@@ -1,5 +1,9 @@
 package com.api.controllers;
 
+import com.api.model.MailMessage;
+import com.api.scv.CSVFileWriter;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.client.auth.oauth2.AuthorizationCodeRequestUrl;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.TokenResponse;
@@ -32,233 +36,343 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
+import javax.mail.MessagingException;
+import javax.mail.Session;
+import javax.mail.internet.MimeMessage;
 import javax.servlet.http.HttpServletRequest;
 import java.awt.*;
+import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.HashSet;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.*;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.StreamSupport;
 
 @Log
 @Controller
 @RestController
 public class GoogleMailController implements ApplicationListener<ApplicationReadyEvent> {
 
-	private static final String APPLICATION_NAME = "SDK mail messages export project";
-	private static HttpTransport httpTransport;
-	private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
-	private static com.google.api.services.gmail.Gmail client;
+    private static final String APPLICATION_NAME = "SDK mail messages export project";
+    private static HttpTransport httpTransport;
+    private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
+    private static com.google.api.services.gmail.Gmail client;
 
-	GoogleClientSecrets clientSecrets;
-	GoogleAuthorizationCodeFlow flow;
-	Credential credential;
+    private Set<String> nameOfAttachments = new HashSet<>();
+    private long attachmentNumber = 0;
 
-	@Value("${gmail.client.clientId}")
-	private String clientId;
+    private GoogleClientSecrets clientSecrets;
+    private GoogleAuthorizationCodeFlow flow;
+    private Credential credential;
 
-	@Value("${gmail.client.clientSecret}")
-	private String clientSecret;
+    private String userId = "me";
 
-	@Value("${launch.url}")
-	private String startUri;
+    @Value("${gmail.client.clientId}")
+    private String clientId;
 
-	@Value("${gmail.client.redirectUri}")
-	private String redirectUri;
+    @Value("${gmail.client.clientSecret}")
+    private String clientSecret;
 
-	@Override
-	public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
-		System.out.println("Application started ... launching browser now");
-		launchBrowse(startUri);
-	}
+    @Value("${launch.url}")
+    private String startUri;
 
-	@RequestMapping(value = "/login/gmail", method = RequestMethod.GET)
-	public RedirectView googleConnectionStatus(HttpServletRequest request) throws Exception {
-		return new RedirectView(authorize());
-	}
+    @Value("${gmail.client.redirectUri}")
+    private String redirectUri;
 
-	@RequestMapping(value = "/login/gmailCallback", method = RequestMethod.GET, params = "code")
-	public ResponseEntity<String> oauth2Callback(@RequestParam(value = "code") String code) {
+    @Value("${store.directory.path}")
+    private String directoryPath;
 
-		// System.out.println("code->" + code + " userId->" + userId + "
-		// query->" + query);
+    @Value("${gmail.filter.query}")
+    private String query;
 
-		JSONObject json = new JSONObject();
-		JSONArray arr = new JSONArray();
+    @Override
+    public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
+        System.out.println("Application started ... launching browser now");
+        launchBrowser(startUri);
+    }
 
-		// String message;
-		try {
-			TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectUri).execute();
-			credential = flow.createAndStoreCredential(response, "userID");
+    @RequestMapping(value = "/login/gmail", method = RequestMethod.GET)
+    public RedirectView googleConnectionStatus(HttpServletRequest request) throws Exception {
+        return new RedirectView(authorize());
+    }
 
-			client = new com.google.api.services.gmail.Gmail.Builder(httpTransport, JSON_FACTORY, credential)
-					.setApplicationName(APPLICATION_NAME).build();
+    @RequestMapping(value = "/login/gmailCallback", method = RequestMethod.GET, params = "code")
+    public ResponseEntity<String> oauth2Callback(@RequestParam(value = "code") String code) throws IOException {
 
-			/*
-			 * Filter filter = new Filter().setCriteria(new
-			 * FilterCriteria().setFrom("a2cart.com@gmail.com"))
-			 * .setAction(new FilterAction()); Filter result =
-			 * client.users().settings().filters().create("me",
-			 * filter).execute();
-			 *
-			 * System.out.println("Created filter " + result.getId());
-			 */
+        JSONObject json = new JSONObject();
+        JSONArray arr = new JSONArray();
 
+        JSONObject rawMsgReq = new JSONObject();
+        JSONArray rawMessages = new JSONArray();
 
+        // String message;
+        try {
+            TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectUri).execute();
+            credential = flow.createAndStoreCredential(response, "userID");
 
-			String userId = "me";
+            client = new com.google.api.services.gmail.Gmail.Builder(httpTransport, JSON_FACTORY, credential)
+                    .setApplicationName(APPLICATION_NAME).build();
+
+            /*
+             * Filter filter = new Filter().setCriteria(new
+             * FilterCriteria().setFrom("a2cart.com@gmail.com"))
+             * .setAction(new FilterAction()); Filter result =
+             * client.users().settings().filters().create("me",
+             * filter).execute();
+             *
+             * System.out.println("Created filter " + result.getId());
+             */
+
 //			String query = "subject:'SDK Test message'";
-			String query = "label:(FRACTAL|API)";
 
-			ListMessagesResponse MsgResponse = client.users().messages().list(userId).setQ(query).execute();
+            ListMessagesResponse MsgResponse = client.users().messages().list(userId).setQ(query).execute();
 
-			List<Message> messages = new ArrayList<>();
+            List<Message> messages = new ArrayList<>();
 
-			System.out.println("message length:" + MsgResponse.getMessages().size());
+            System.out.println("-----------------------------------------------------");
+            System.out.println("Messages found: " + MsgResponse.getMessages().size());
 
-			Set<String> nameOfAttachments = new HashSet<>();
-			int attachmentNumber = 0;
+            List<MailMessage> mailMessageList = new ArrayList<>();
+            for (Message msg : MsgResponse.getMessages()) {
+                messages.add(msg);
+                Message message = client.users().messages().get(userId, msg.getId()).execute();
 
-			for (Message msg : MsgResponse.getMessages()) {
+                arr.put(message.getSnippet());
 
-				messages.add(msg);
+                MailMessage mailMessage = compileMailMessage(message);
+                mailMessageList.add(mailMessage);
+                rawMessages.put(mailMessage);
 
-				Message message = client.users().messages().get(userId, msg.getId()).execute();
-				System.out.println("--------------------------------------");
-				System.out.println("msgId :" + message.getId());
+                /*
+                 * if (MsgResponse.getNextPageToken() != null) { String
+                 * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
+                 * client.users().messages().list(userId).setQ(query).
+                 * setPageToken(pageToken).execute(); } else { break; }
+                 */
+            }
+            rawMsgReq.put("messages", rawMessages);
 
-				List<MessagePart> parts = message.getPayload().getParts();
+            CSVFileWriter.writeCSVFile(directoryPath + "Mail_Messages.csv", mailMessageList);
+            System.out.println("Attachments are stored");
+            System.out.println("Messages are stored in CSV file");
+            System.out.println("Total messages processed: " + mailMessageList.size());
+            System.out.println("-----------------------------------------------------");
+        } catch (Exception e) {
+            System.out.println("exception cached: " + e.getMessage());
+        } finally {
+            System.exit(0);
+        }
+
+        return new ResponseEntity<>(rawMsgReq.toString(), HttpStatus.OK);
+    }
+
+    private String authorize() throws Exception {
+        AuthorizationCodeRequestUrl authorizationUrl;
+        if (flow == null) {
+            Details web = new Details();
+            web.setClientId(clientId);
+            web.setClientSecret(clientSecret);
+            clientSecrets = new GoogleClientSecrets().setWeb(web);
+            httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+
+            List<String> listOfScopes = new ArrayList<>();
+            listOfScopes.add(GmailScopes.MAIL_GOOGLE_COM);
+            listOfScopes.add(GmailScopes.GMAIL_MODIFY);
+            listOfScopes.add(GmailScopes.GMAIL_READONLY);
+
+            flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
+                    new ArrayList<>(listOfScopes)).build();
+        }
+        authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectUri);
+
+        System.out.println("Gmail authorizationUrl ->" + authorizationUrl);
+        return authorizationUrl.build();
+    }
+
+    private void launchBrowser(String url) {
+        if (Desktop.isDesktopSupported()) {
+            Desktop desktop = Desktop.getDesktop();
+            try {
+                desktop.browse(new URI(url));
+            } catch (IOException | URISyntaxException e) {
+                e.printStackTrace();
+            }
+        } else {
+            Runtime runtime = Runtime.getRuntime();
+
+            // http://lopica.sourceforge.net/os.html
+            String os = System.getProperty("os.name").toLowerCase();
+
+            try {
+                if (os.contains("win")) {
+                    // do not support links by format "leodev.html#someTag"
+                    // if windows, open url via cmd
+                    runtime.exec("rundll32 url.dll,FileProtocolHandler " + url);
+                } else if (os.contains("mac")) {
+                    runtime.exec("open " + url);
+                } else if (os.contains("nix") || os.contains("nux")) {
+                    String[] browsers = {"epiphany", "firefox", "mozilla", "konqueror", "netscape",
+                            "opera", "links", "lynx"};
+                    // String formatting with colling all browsers through '||' in shell terminal
+                    // "browser0 "URI" || browser1 "URI" ||..."
+                    StringBuilder cmd = new StringBuilder();
+                    for (int i = 0; i < browsers.length; i++)
+                        cmd.append(i == 0 ? "" : " || ").append(browsers[i]).append(" \"").append(url).append("\" ");
+                    runtime.exec(new String[]{"sh", "-c", cmd.toString()});
+                } else {
+                    return;
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**
+     * Save the attachments in a given email.
+     *
+     * @param service       Authorized Gmail API instance.
+     * @param userId        User's email address. The special value "me"
+     *                      can be used to indicate the authenticated user.
+     * @param messageId     ID of Message containing attachment.
+     * @param attachmentId  ID of Attachment.
+     * @param filename      name of file in attachment.
+     * @param directoryPath path of directory to store attachments
+     * @throws IOException
+     */
+    private void storeAttachments(Gmail service, String userId, String messageId, String attachmentId,
+                                  String filename, String directoryPath) throws IOException {
+
+        MessagePartBody attachPart = service.users().messages().attachments().
+                get(userId, messageId, attachmentId).execute();
+
+        Base64 base64Url = new Base64(true);
+        byte[] fileByteArray = base64Url.decodeBase64(attachPart.getData());
+
+        Path path = Paths.get(directoryPath);
+        if (!Files.exists(path)) {
+            Files.createDirectories(path);
+        }
+
+        FileOutputStream fileOutFile =
+                new FileOutputStream(directoryPath + filename);
+        fileOutFile.write(fileByteArray);
+        fileOutFile.close();
+    }
+
+    private MailMessage compileMailMessage(Message message) throws IOException, MessagingException {
+        JsonNode messageNode;
+        ObjectMapper mapper = new ObjectMapper();
+        messageNode = mapper.readTree(message.toPrettyString());
+
+        // getting message id
+        MailMessage mailMessage = new MailMessage();
+        String messageId = messageNode.get("id").asText();
+        mailMessage.setId(messageId);
+
+        // getting snippet
+        mailMessage.setSnippet(messageNode.get("snippet").asText());
+
+        // getting date
+        JsonNode messagePayloadNode = messageNode.get("payload");
+        Optional<JsonNode> jsonNode = getJsonNodeByField(messagePayloadNode,
+                "headers", "name", "Date");
+        mailMessage.setDate(jsonNode.get().get("value").asText());
+
+        // getting subject
+        jsonNode = getJsonNodeByField(messagePayloadNode,
+                "headers", "name", "Subject");
+        mailMessage.setSubject(jsonNode.get().get("value").asText());
+
+        // getting attachments
+        List<MessagePart> parts = message.getPayload().getParts();
+        String mailAttachmentFileNames = "";
+
+        for (MessagePart part : parts) {
+            String attachmentId = part.getBody().getAttachmentId();
+
+            if (attachmentId != null) {
+                String attachmentFilename = part.getFilename();
+
+                String regex = "(.+?)(\\.[^.]*$|$)";
+                String pureFileName = "";
+                String fileNameExtension = "";
+                Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
+                if (m.matches()) {
+                    pureFileName = m.group(1);
+                    fileNameExtension = attachmentFilename.substring(pureFileName.length());
+                }
+
+                if (nameOfAttachments.contains(pureFileName)) {
+                    //todo attachment number should inc for the in same filename ranges
+                    attachmentNumber++;
+                    attachmentFilename = pureFileName + "_" + attachmentNumber + fileNameExtension;
+
+                }
+                nameOfAttachments.add(pureFileName);
+                mailAttachmentFileNames = mailAttachmentFileNames + " " + attachmentFilename;
+
+                // saving attachment file to local storage
+                storeAttachments(client, userId, messageId, attachmentId,
+                        attachmentFilename, directoryPath + "attachments/");
+            }
+        }
+
+        mailMessage.setAttachments(mailAttachmentFileNames);
+
+        // getting from
+        jsonNode = getJsonNodeByField(messagePayloadNode,
+                "headers", "name", "From");
+        mailMessage.setFrom(jsonNode.get().get("value").asText());
+
+        // getting to
+        jsonNode = getJsonNodeByField(messagePayloadNode,
+                "headers", "name", "To");
+        mailMessage.setTo(jsonNode.get().get("value").asText());
+
+//        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
+
+        return mailMessage;
+    }
+
+    private Optional<JsonNode> getJsonNodeByField(JsonNode requestJsonNode, String groupFieldName,
+                                                  String fieldName, String fieldValue) {
+        return StreamSupport.stream(requestJsonNode.get(groupFieldName).spliterator(), false)
+                .filter(node -> fieldValue.equals(node.get(fieldName).asText()))
+                .findFirst();
+    }
 
 
-				for(MessagePart part: parts) {
-					String attachmentId = part.getBody().getAttachmentId();
+    /**
+     * Get a Message and use it to create a MimeMessage.
+     *
+     * @param service   Authorized Gmail API instance.
+     * @param userId    User's email address. The special value "me"
+     *                  can be used to indicate the authenticated user.
+     * @param messageId ID of Message to retrieve.
+     * @return MimeMessage MimeMessage populated from retrieved Message.
+     * @throws IOException
+     * @throws MessagingException
+     */
+    private static MimeMessage getMimeMessage(Gmail service, String userId, String messageId)
+            throws IOException, MessagingException {
+        Message message = service.users().messages().get(userId, messageId).setFormat("raw").execute();
 
-					if (attachmentId != null) {
-						System.out.println("\tattachments : ");
-						System.out.println("\t|\tid : " + attachmentId);
+        Base64 base64Url = new Base64(true);
+        byte[] emailBytes = base64Url.decodeBase64(message.getRaw());
 
-						String attachmentFilename = part.getFilename();
+        Properties props = new Properties();
+        Session session = Session.getDefaultInstance(props, null);
 
-						String regex = "(.+?)(\\.[^.]*$|$)";
-						String pureFileName = "";
-						String fileNameExtention = "";
-						Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
-						if(m.matches())
-						{
-							pureFileName = m.group(1);
-							fileNameExtention = attachmentFilename.substring(pureFileName.length(), attachmentFilename.length());
-						}
+        MimeMessage email = new MimeMessage(session, new ByteArrayInputStream(emailBytes));
 
-						if (nameOfAttachments.contains(pureFileName)) {
-							//todo attachment number should inc for the in same filename ranges
-							attachmentNumber++;
-							attachmentFilename = pureFileName + "_" +attachmentNumber + fileNameExtention;
-
-						}
-						nameOfAttachments.add(pureFileName);
-						System.out.println("\t|\tfilename : " + attachmentFilename);
-
-						// saving attachment file
-						storeAttachments(client, userId, message.getId(), attachmentId, attachmentFilename);
-
-					}
-
-				}
-				System.out.println("snippet :" + message.getSnippet());
-//				System.out.println("pretty :" + message.toPrettyString());
-				System.out.println("--------------------------------------");
-
-				arr.put(message.getSnippet());
-
-				/*
-				 * if (MsgResponse.getNextPageToken() != null) { String
-				 * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
-				 * client.users().messages().list(userId).setQ(query).
-				 * setPageToken(pageToken).execute(); } else { break; }
-				 */
-			}
-			json.put("response", arr);
-
-			for (Message msg : messages) {
-
-				System.out.println("msg: " + msg.toPrettyString());
-			}
-
-		} catch (Exception e) {
-
-			System.out.println("exception cached ");
-			e.printStackTrace();
-		}
-
-		return new ResponseEntity<>(json.toString(), HttpStatus.OK);
-	}
-
-	private String authorize() throws Exception {
-		AuthorizationCodeRequestUrl authorizationUrl;
-		if (flow == null) {
-			Details web = new Details();
-			web.setClientId(clientId);
-			web.setClientSecret(clientSecret);
-			clientSecrets = new GoogleClientSecrets().setWeb(web);
-			httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-
-			List<String> listOfScopes = new ArrayList<>();
-			listOfScopes.add(GmailScopes.MAIL_GOOGLE_COM);
-			listOfScopes.add(GmailScopes.GMAIL_MODIFY);
-			listOfScopes.add(GmailScopes.GMAIL_READONLY);
-
-			flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
-					new ArrayList<>(listOfScopes)).build();
-		}
-		authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectUri);
-
-		System.out.println("gamil authorizationUrl ->" + authorizationUrl);
-		return authorizationUrl.build();
-	}
-
-	private void launchBrowse(String url) {
-		if(Desktop.isDesktopSupported()){
-			Desktop desktop = Desktop.getDesktop();
-			try {
-				desktop.browse(new URI(url));
-			} catch (IOException | URISyntaxException e) {
-				e.printStackTrace();
-			}
-		}else{
-			Runtime runtime = Runtime.getRuntime();
-			try {
-				runtime.exec("rundll32 url.dll,FileProtocolHandler " + url);
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
-	}
-
-	/**
-	 * Save the attachments in a given email.
-	 *
-	 * @param service Authorized Gmail API instance.
-	 * @param userId User's email address. The special value "me"
-	 * can be used to indicate the authenticated user.
-	 * @param messageId ID of Message containing attachment..
-	 * @throws IOException
-	 */
-	private void storeAttachments(Gmail service, String userId, String messageId, String attachmentId, String filename)
-			throws IOException {
-
-				MessagePartBody attachPart = service.users().messages().attachments().
-						get(userId, messageId, attachmentId).execute();
-
-				Base64 base64Url = new Base64(true);
-				byte[] fileByteArray = base64Url.decodeBase64(attachPart.getData());
-				FileOutputStream fileOutFile =
-						new FileOutputStream("D:\\attachments\\" + filename);
-				fileOutFile.write(fileByteArray);
-				fileOutFile.close();
-	}
+        return email;
+    }
 }
