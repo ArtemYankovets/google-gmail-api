@@ -1,0 +1,203 @@
+{
+  "historyId": "1847",
+  "id": "1651b3ee1e7a5277",
+  "internalDate": "1533760418000",
+  "labelIds": [
+    "Label_8945122709740364761",
+    "IMPORTANT",
+    "CATEGORY_PERSONAL",
+    "INBOX"
+  ],
+  "payload": {
+    "body": {
+      "size": 0
+    },
+    "filename": "",
+    "headers": [
+      {
+        "name": "Delivered-To",
+        "value": "sdkmessageexport@gmail.com"
+      },
+      {
+        "name": "Received",
+        "value": "by 2002:ab3:4f0a:0:0:0:0:0 with SMTP id k10-v6csp1221900lte;        Wed, 8 Aug 2018 13:33:50 -0700 (PDT)"
+      },
+      {
+        "name": "X-Received",
+        "value": "by 2002:a24:7a84:: with SMTP id a126-v6mr476658itc.111.1533760430411;        Wed, 08 Aug 2018 13:33:50 -0700 (PDT)"
+      },
+      {
+        "name": "ARC-Seal",
+        "value": "i=1; a=rsa-sha256; t=1533760430; cv=none;        d=google.com; s=arc-20160816;        b=RnpzaqOiA69CyrtU4j58LcnAfww4wuoT268hiIafPxO2a+qMe4KJDnSvrwaSGNVT3q         avOmHOGEt8gkc9yqt6i+u9fw2C8IQAiDAG7t2qI1vJa/t6BIbgG821CkdKCNdTH3LKhO         BdUQJ79jib/jznX9F3lcsMZ5XJYVUP3TdTe0CcKz2cH2Z/A159plO+FlF/VIkFJHMQqt         JSZxm+ETBa7VmEK4v0fLL3+nEEgdXtA2xThWHvPLKr2YbR36fJTBNLfkdBkhRapuTe5j         1jpu7TJJc3LFE0FmeJcsbB7xHMO9XlksIse+GsFkUou5iweic1MPHYT+0hbhzBxlsynf         XHHg=="
+      },
+      {
+        "name": "ARC-Message-Signature",
+        "value": "i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20160816;        h=to:subject:message-id:date:from:in-reply-to:references:mime-version         :dkim-signature:arc-authentication-results;        bh=PZP0kawQXAmL/RXZBlELty32mt1A5cNZ/GjY57UtLO4=;        b=QzkYk5i8Ae4G+gdCpeqP65cBIUW2YA3SYpPLuuwhQ5QA8blAA1Bhj8I2vNHz3Fu8ys         AmrwdusSoEtTDXiZe6xcEaLDCr6PECotuRSfjxddGw/6Or5DToC9IYxJIwCOdhjqf0nm         GcOu4L7ZoMVAUmjRbgvU0lc8TCr4cFo8wk2B5ubqxVTTg+6dycwfEzsJBgZYT4jIXcSI         WHy/2H/7/aWVxG3MLWkPwg29hX4HosOIozigj40BdlAw8GaQb4THI8UaR4Ed2l1BLt+2         Kd9fhLsjvQ++4FAdYOiMM7ZGkklE0FzibGudwkb7TM88l/K1qiWUCBO29JT3+4dGKooh         TH5g=="
+      },
+      {
+        "name": "ARC-Authentication-Results",
+        "value": "i=1; mx.google.com;       dkim=pass header.i=@gmail.com header.s=20161025 header.b=Brdef+y5;       spf=pass (google.com: domain of artemyankovets@gmail.com designates 209.85.220.65 as permitted sender) smtp.mailfrom=artemyankovets@gmail.com;       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com"
+      },
+      {
+        "name": "Return-Path",
+        "value": "<artemyankovets@gmail.com>"
+      },
+      {
+        "name": "Received",
+        "value": "from mail-sor-f65.google.com (mail-sor-f65.google.com. [209.85.220.65])        by mx.google.com with SMTPS id q2-v6sor1771745iog.302.2018.08.08.13.33.50        for <sdkmessageexport@gmail.com>        (Google Transport Security);        Wed, 08 Aug 2018 13:33:50 -0700 (PDT)"
+      },
+      {
+        "name": "Received-SPF",
+        "value": "pass (google.com: domain of artemyankovets@gmail.com designates 209.85.220.65 as permitted sender) client-ip=209.85.220.65;"
+      },
+      {
+        "name": "Authentication-Results",
+        "value": "mx.google.com;       dkim=pass header.i=@gmail.com header.s=20161025 header.b=Brdef+y5;       spf=pass (google.com: domain of artemyankovets@gmail.com designates 209.85.220.65 as permitted sender) smtp.mailfrom=artemyankovets@gmail.com;       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com"
+      },
+      {
+        "name": "DKIM-Signature",
+        "value": "v=1; a=rsa-sha256; c=relaxed/relaxed;        d=gmail.com; s=20161025;        h=mime-version:references:in-reply-to:from:date:message-id:subject:to;        bh=PZP0kawQXAmL/RXZBlELty32mt1A5cNZ/GjY57UtLO4=;        b=Brdef+y51F9giK0tV9V1EvPMnm+nO6c8tMi+DsJWDFWL7okr7qz/Ij4qrVtNdRpsqe         Gwh3KaWjN8xgZzaXBPFCmNQWSpM0LcJWV6Cs87cSyX+cNLMHoew8/WMJ2FrZ2dwLzjLC         yE1Jju1slANWunlYYjf6dK7RVYiOi7rYs6aS1H2fr/isSY1ry0ac9akqWQGDDqh3H/7v         J0Vep0XqNj3cPtQt5PdNkANQtlvEXsTKhXvqaOdqdiCQuMVR09PwVIqv7hGv+DQW9Xcc         bEC/bxlfeSZYgaJU8IwPPSBEZjyvDD5n9NXelC5fyyot+1NkNLvIB9WMj9XEANBUuM6G         gK1Q=="
+      },
+      {
+        "name": "X-Google-DKIM-Signature",
+        "value": "v=1; a=rsa-sha256; c=relaxed/relaxed;        d=1e100.net; s=20161025;        h=x-gm-message-state:mime-version:references:in-reply-to:from:date         :message-id:subject:to;        bh=PZP0kawQXAmL/RXZBlELty32mt1A5cNZ/GjY57UtLO4=;        b=Kozwba5Iki+qCILNlaB1Hflr6nutDsJgErjjxqRUEt9RcZVoiF+vU91zFjdcJNv001         XhgZGjF5W6leOojkgXKZeqMNY3+FibKw6NjEkLn629yxACpBQQJiewLcpA1L9yciHLQO         +0aAlja2uJ1TveJ0uIUzl3X5dKkeUJcflq5yqWyY7kgdQVDU581E0Qffu1N4yA2EBbv+         Z42KK3XBHDkEqRXt41y7UM6Ewd7TOJY3yYda4rE7CHRbNp/JlT+p2n0lhOej63aBvp00         UomYu6mEkpG+MhbT8I5Uiqf15ULmVv/g8bkIJS3u9KizNp/DpBuGRvEgDviusQ+VPxuy         VIAw=="
+      },
+      {
+        "name": "X-Gm-Message-State",
+        "value": "AOUpUlE/2Lt9Qpu2TPdyF3QN6nOMahYa3osHlMGI2umw07rnrV5NjaZR q/gvaU2/qHazNObdoISf96i5aLeN3ES0B2Aud83SPq0j"
+      },
+      {
+        "name": "X-Google-Smtp-Source",
+        "value": "AA+uWPwCvcX+tE8jGdGWL+sQvPBZ8HZuXOOvcpw0/ufYkeJvtV+/mjF4rs/RsoiZamN1hv1xM8Swb/Pm/CIAxk3tA3o="
+      },
+      {
+        "name": "X-Received",
+        "value": "by 2002:a6b:dd01:: with SMTP id f1-v6mr3625615ioc.45.1533760429547; Wed, 08 Aug 2018 13:33:49 -0700 (PDT)"
+      },
+      {
+        "name": "MIME-Version",
+        "value": "1.0"
+      },
+      {
+        "name": "References",
+        "value": "<CAKYG3wQLTVZowRSAtXKv7NF8P5hqkmXBkscdtWbU9XeoKsdMKQ@mail.gmail.com>"
+      },
+      {
+        "name": "In-Reply-To",
+        "value": "<CAKYG3wQLTVZowRSAtXKv7NF8P5hqkmXBkscdtWbU9XeoKsdMKQ@mail.gmail.com>"
+      },
+      {
+        "name": "From",
+        "value": "Artem Yankovets <artemyankovets@gmail.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Wed, 8 Aug 2018 23:33:38 +0300"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<CAKYG3wQZNC-Bs8S8wCAcUp1cM_B=dJtkiUjQw7eNNRRuKdHyPA@mail.gmail.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Fwd: SDK Test message"
+      },
+      {
+        "name": "To",
+        "value": "sdkmessageexport@gmail.com"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/mixed; boundary=\"0000000000009341970572f26d3f\""
+      }
+    ],
+    "mimeType": "multipart/mixed",
+    "partId": "",
+    "parts": [
+      {
+        "body": {
+          "size": 0
+        },
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "multipart/alternative; boundary=\"0000000000009341930572f26d3d\""
+          }
+        ],
+        "mimeType": "multipart/alternative",
+        "partId": "0",
+        "parts": [
+          {
+            "body": {
+              "data": "SGkgU0RLLA0KDQpIb3cgYXJlIHlvdT8NCjxodHRwczovL3Byb2ZpbGVzLmdvb2dsZS5jb20vP2hsPWVuJnRhYj1tWD4NCg0KSGF2ZSB5b3UgaGVhcmQgc29tZXRoaW5nIGFib3V0IHRoaXMgPGh0dHBzOi8vZW4ud2lraXBlZGlhLm9yZy93aWtpL0ZyYWN0YWw-Pw0KDQotLSANCipCZXN0IFJlZ2FyZHMsKg0KKkFydGVtIFlhbmtvdmV0cyoNCg==",
+              "size": 193
+            },
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "text/plain; charset=\"UTF-8\""
+              }
+            ],
+            "mimeType": "text/plain",
+            "partId": "0.0"
+          },
+          {
+            "body": {
+              "data": "PGRpdiBkaXI9Imx0ciI-PGRpdiBjbGFzcz0iZ21haWxfcXVvdGUiPjxkaXYgZGlyPSJsdHIiPkhpIFNESyw8YnI-PC9kaXY-PGRpdiBkaXI9Imx0ciI-PGRpdj48YnI-PC9kaXY-PGRpdj5Ib3cgYXJlIHlvdT88YSBjbGFzcz0ibV8yMzgzMzQ2ODM3ODMzMjEyNjc3Z21haWwtZ2JfeWIgbV8yMzgzMzQ2ODM3ODMzMjEyNjc3Z21haWwtZ2JfNWYgbV8yMzgzMzQ2ODM3ODMzMjEyNjc3Z21haWwtZ2JfQWIiIGhyZWY9Imh0dHBzOi8vcHJvZmlsZXMuZ29vZ2xlLmNvbS8_aGw9ZW4mYW1wO3RhYj1tWCIgdGFyZ2V0PSJfYmxhbmsiPjxicj48L2E-PGRpdj48YnI-PC9kaXY-PGRpdj5IYXZlIHlvdSBoZWFyZCBzb21ldGhpbmcgYWJvdXQgPGEgaHJlZj0iaHR0cHM6Ly9lbi53aWtpcGVkaWEub3JnL3dpa2kvRnJhY3RhbCIgdGFyZ2V0PSJfYmxhbmsiPnRoaXM8L2E-PzwvZGl2PjxkaXY-PGJyPjwvZGl2Pi0tIDxicj48ZGl2IGRpcj0ibHRyIiBjbGFzcz0ibV8yMzgzMzQ2ODM3ODMzMjEyNjc3Z21haWxfc2lnbmF0dXJlIiBkYXRhLXNtYXJ0bWFpbD0iZ21haWxfc2lnbmF0dXJlIj48ZGl2PjxzcGFuIHN0eWxlPSJjb2xvcjpyZ2IoMzQsMzQsMzQpO2ZvbnQtZmFtaWx5OmFyaWFsLHNhbnMtc2VyaWY7Zm9udC1zaXplOjEzcHg7YmFja2dyb3VuZC1jb2xvcjpyZ2IoMjU1LDI1NSwyNTUpIj48aT48Yj48c3BhbiBzdHlsZT0iY29sb3I6cmdiKDM0LDM0LDM0KSI-QmVzdDwvc3Bhbj7CoDxzcGFuIHN0eWxlPSJjb2xvcjpyZ2IoMzQsMzQsMzQpIj5SZWdhcmRzPC9zcGFuPiw8L2I-PC9pPjwvc3Bhbj48L2Rpdj48c3BhbiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjpyZ2IoMjU1LDI1NSwyNTUpIj48aT48Yj5BcnRlbSBZYW5rb3ZldHM8L2I-PC9pPjwvc3Bhbj48L2Rpdj48L2Rpdj48L2Rpdj48L2Rpdj48L2Rpdj4NCg==",
+              "size": 907
+            },
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=\"UTF-8\""
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "quoted-printable"
+              }
+            ],
+            "mimeType": "text/html",
+            "partId": "0.1"
+          }
+        ]
+      },
+      {
+        "body": {
+          "attachmentId": "ANGjdJ8suEY2R4es6posCU7hR7uqDrbxzzjLtmj5Mt4-msVn9mchg4D0NzqILzWYTmKuZgmKjJguRrNbhqK40u89jdvbQJWgB5OJ_FQCqvDaag7sdJ0LP5BYhXvfz3oelf1zwa14fS5lqOH64_uYpd8gjaDgvijtNVBewX8qGcihZPsDdW-LNCnra0_XIzNN4vTELEaoedt2jCpnMx2RniSopDS9licgI5yPjZCwfJdYgcfQlb2WV20CD3J1ft2cawErMfjvs7oN-M3NrGDArywUciVpyFPsKu5XodTrkpq8tE--CX34XyX24qSBZqLbVar9jGglkozdpPopaVXnTJk8GycjZtw4_tSHF6ou12urJnB0iATYJ6WrrQ98pdMgONyFYw2KfJZKwxd8BiJY",
+          "size": 429699
+        },
+        "filename": "GreetingCard-Lauren-2-copy.jpg",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "image/jpeg; name=\"GreetingCard-Lauren-2-copy.jpg\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"GreetingCard-Lauren-2-copy.jpg\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-ID",
+            "value": "<f_jkll5yhs1>"
+          },
+          {
+            "name": "X-Attachment-Id",
+            "value": "f_jkll5yhs1"
+          }
+        ],
+        "mimeType": "image/jpeg",
+        "partId": "1"
+      }
+    ]
+  },
+  "sizeEstimate": 594651,
+  "snippet": "Hi SDK, How are you? Have you heard something about this? -- Best Regards, Artem Yankovets",
+  "threadId": "1651b3a46cce88d0"
+}
