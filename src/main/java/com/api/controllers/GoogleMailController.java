@@ -17,6 +17,8 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.client.repackaged.org.apache.commons.codec.binary.Base64;
 import com.google.api.services.gmail.Gmail;
 import com.google.api.services.gmail.GmailScopes;
+import com.google.api.services.gmail.model.Label;
+import com.google.api.services.gmail.model.ListLabelsResponse;
 import com.google.api.services.gmail.model.ListMessagesResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
@@ -40,6 +42,7 @@ import javax.mail.MessagingException;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import javax.servlet.http.HttpServletRequest;
+
 import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
@@ -53,6 +56,7 @@ import java.util.*;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 @Log
@@ -61,6 +65,8 @@ import java.util.stream.StreamSupport;
 public class GoogleMailController implements ApplicationListener<ApplicationReadyEvent> {
 
     private static final String APPLICATION_NAME = "SDK mail messages export project";
+    private static final String HEADERS = "headers";
+    private static final String VALUE = "value";
     private static HttpTransport httpTransport;
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
     private static com.google.api.services.gmail.Gmail client;
@@ -72,10 +78,11 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private String attachmentsPath;
     private String csvFileName = "Mail_Messages.csv";
 
-
     private GoogleClientSecrets clientSecrets;
     private GoogleAuthorizationCodeFlow flow;
     private Credential credential;
+
+    private long mailCounter;
 
     private String userId = "me";
 
@@ -117,8 +124,10 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         JSONObject rawMsgReq = new JSONObject();
         JSONArray rawMessages = new JSONArray();
 
-        // String message;
+        mailCounter = 0;
+
         try {
+
             TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectUri).execute();
             credential = flow.createAndStoreCredential(response, "userID");
 
@@ -137,51 +146,66 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
 //			String query = "subject:'SDK Test message'";
 
-            ListMessagesResponse MsgResponse = client.users().messages().list(userId).setQ(query).execute();
+            ListMessagesResponse MsgResponse;
 
-            List<Message> messages = new ArrayList<>();
-            List<MailMessage> mailMessageList = new ArrayList<>();
-
-            if (MsgResponse.getMessages() != null) {
-
-                System.out.println("-----------------------------------------------------");
-                System.out.println("Messages found: " + MsgResponse.getMessages().size());
-                createStorage(directoryPath);
-
-                for (Message msg : MsgResponse.getMessages()) {
-                    messages.add(msg);
-                    Message message = client.users().messages().get(userId, msg.getId()).execute();
-
-                    arr.put(message.getSnippet());
-
-                    MailMessage mailMessage = compileMailMessage(message);
-                    mailMessageList.add(mailMessage);
-                    rawMessages.put(mailMessage);
-
-                    /*
-                     * if (MsgResponse.getNextPageToken() != null) { String
-                     * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
-                     * client.users().messages().list(userId).setQ(query).
-                     * setPageToken(pageToken).execute(); } else { break; }
-                     */
-                }
-                rawMsgReq.put("messages", rawMessages);
-
-
-                String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
-                System.out.println("Attachments are stored in \n\t"
-                        + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
-
-                String filePath = directoryPath + "/" + csvFileName;
-                CSVFileWriter.writeCSVFile(filePath, mailMessageList);
-
-                System.out.println("Messages are stored in CSV file \n\t"
-                        + Paths.get(filePath).toAbsolutePath().toString());
+            String basicLabel = containsMultipleLabels(query);
+            if (!basicLabel.isEmpty()) {
+                String labelsGroup = getLabels(client, userId, basicLabel);
+                System.out.println("Generated query is " + labelsGroup);
+                query = labelsGroup;
             }
-            System.out.println("Total messages processed: " + mailMessageList.size());
+
+
+            {
+
+                MsgResponse = client.users().messages().list(userId).setQ(query).execute();
+                List<Message> messages = new ArrayList<>();
+                List<MailMessage> mailMessageList = new ArrayList<>();
+
+                if (MsgResponse.getMessages() != null) {
+
+                    System.out.println("-----------------------------------------------------");
+                    System.out.println("Messages found: " + MsgResponse.getMessages().size());
+                    createStorage(directoryPath);
+
+
+                    for (Message msg : MsgResponse.getMessages()) {
+                        messages.add(msg);
+                        Message message = client.users().messages().get(userId, msg.getId()).execute();
+
+                        arr.put(message.getSnippet());
+
+                        MailMessage mailMessage = compileMailMessage(message);
+                        mailMessageList.add(mailMessage);
+                        rawMessages.put(mailMessage);
+
+                        /*
+                         * if (MsgResponse.getNextPageToken() != null) { String
+                         * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
+                         * client.users().messages().list(userId).setQ(query).
+                         * setPageToken(pageToken).execute(); } else { break; }
+                         */
+                    }
+                    rawMsgReq.put("messages", rawMessages);
+
+
+                    String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
+                    System.out.println("Attachments are stored in \n\t"
+                            + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
+
+                    String filePath = directoryPath + "/" + csvFileName;
+                    CSVFileWriter.writeCSVFile(filePath, mailMessageList);
+
+                    System.out.println("Messages are stored in CSV file \n\t"
+                            + Paths.get(filePath).toAbsolutePath().toString());
+                }
+                System.out.println("Total messages processed: " + mailMessageList.size());
+                System.out.println("next page");
+            }
             System.out.println("-----------------------------------------------------");
         } catch (Exception e) {
             System.out.println("exception cached: " + e.getMessage());
+            e.printStackTrace();
         } finally {
             System.exit(0);
         }
@@ -308,61 +332,61 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         // getting date
         JsonNode messagePayloadNode = messageNode.get("payload");
         Optional<JsonNode> jsonNode = getJsonNodeByField(messagePayloadNode,
-                "headers", "name", "Date");
-        mailMessage.setDate(jsonNode.get().get("value").asText());
+                HEADERS, "name", "Date");
+        jsonNode.ifPresent(jsonNode1 -> mailMessage.setDate(jsonNode1.get(VALUE).asText()));
 
         // getting subject
         jsonNode = getJsonNodeByField(messagePayloadNode,
-                "headers", "name", "Subject");
-        mailMessage.setSubject(jsonNode.get().get("value").asText());
+                HEADERS, "name", "Subject");
+        jsonNode.ifPresent(jsonNode1 -> mailMessage.setSubject(jsonNode1.get(VALUE).asText()));
 
         // getting attachments
         List<MessagePart> parts = message.getPayload().getParts();
-        String mailAttachmentFileNames = "";
+        if (parts != null && !parts.isEmpty()) {
+            String mailAttachmentFileNames = "";
+            for (MessagePart part : parts) {
+                String attachmentId = part.getBody().getAttachmentId();
 
-        for (MessagePart part : parts) {
-            String attachmentId = part.getBody().getAttachmentId();
+                if (attachmentId != null) {
+                    String attachmentFilename = part.getFilename();
 
-            if (attachmentId != null) {
-                String attachmentFilename = part.getFilename();
+                    String regex = "(.+?)(\\.[^.]*$|$)";
+                    String pureFileName = "";
+                    String fileNameExtension = "";
+                    Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
+                    if (m.matches()) {
+                        pureFileName = m.group(1);
+                        fileNameExtension = attachmentFilename.substring(pureFileName.length());
+                    }
 
-                String regex = "(.+?)(\\.[^.]*$|$)";
-                String pureFileName = "";
-                String fileNameExtension = "";
-                Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
-                if (m.matches()) {
-                    pureFileName = m.group(1);
-                    fileNameExtension = attachmentFilename.substring(pureFileName.length());
+                    if (nameOfAttachments.contains(pureFileName)) {
+                        //todo attachment number should inc for the in same filename ranges
+                        attachmentNumber++;
+                        attachmentFilename = pureFileName + "_" + attachmentNumber + fileNameExtension;
+
+                    }
+                    nameOfAttachments.add(pureFileName);
+                    mailAttachmentFileNames = mailAttachmentFileNames + " " + attachmentFilename;
+
+                    // saving attachment file to local storage
+                    storeAttachments(client, userId, messageId, attachmentId,
+                            attachmentFilename, attachmentsPath);
                 }
-
-                if (nameOfAttachments.contains(pureFileName)) {
-                    //todo attachment number should inc for the in same filename ranges
-                    attachmentNumber++;
-                    attachmentFilename = pureFileName + "_" + attachmentNumber + fileNameExtension;
-
-                }
-                nameOfAttachments.add(pureFileName);
-                mailAttachmentFileNames = mailAttachmentFileNames + " " + attachmentFilename;
-
-                // saving attachment file to local storage
-                storeAttachments(client, userId, messageId, attachmentId,
-                        attachmentFilename, attachmentsPath);
             }
+            mailMessage.setAttachments(mailAttachmentFileNames);
         }
-
-        mailMessage.setAttachments(mailAttachmentFileNames);
 
         // getting from
         jsonNode = getJsonNodeByField(messagePayloadNode,
-                "headers", "name", "From");
-        mailMessage.setFrom(jsonNode.get().get("value").asText());
-
+                HEADERS, "name", "From");
+        jsonNode.ifPresent(jsonNode1 -> mailMessage.setFrom(jsonNode1.get(VALUE).asText()));
         // getting to
         jsonNode = getJsonNodeByField(messagePayloadNode,
-                "headers", "name", "To");
-        mailMessage.setTo(jsonNode.get().get("value").asText());
+                HEADERS, "name", "To");
+        jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
 
 //        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
+        System.out.println("Mail massage " + ++mailCounter);
 
         return mailMessage;
     }
@@ -399,5 +423,46 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         MimeMessage email = new MimeMessage(session, new ByteArrayInputStream(emailBytes));
 
         return email;
+    }
+
+    private String getLabels(Gmail service, String userId, String basicLabel) {
+        String result = "";
+
+        try {
+            ListLabelsResponse listResponse = service.users().labels().list(userId).execute();
+            List<Label> labels = listResponse.getLabels();
+
+            result = labels.stream()
+                    .map(label -> label.getName())
+                    .filter(l -> l.startsWith(basicLabel))
+                    .collect(Collectors.joining("|"));
+
+            if (labels.isEmpty()) {
+                System.out.println("No labels found.");
+            } else {
+                System.out.println("Labels:");
+                for (Label label : labels) {
+                    System.out.printf("- %s\n", label.getName());
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return String.format("'label:(%s)'", result);
+    }
+
+    private String containsMultipleLabels(String basicQuery) {
+
+        String result = "";
+        String regex = "\\((.*?)\\)";
+        String pureQuery;
+        Matcher m = Pattern.compile(regex).matcher(basicQuery);
+        if (m.find()) {
+            pureQuery = m.group(1);
+            if (pureQuery.contains("*")) {
+                result = pureQuery.substring(0, pureQuery.length() - 1);
+            }
+        }
+        return result;
     }
 }

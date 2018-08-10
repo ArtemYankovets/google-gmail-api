@@ -13,7 +13,7 @@ public class MailMessage {
 
     private String snippet;
 
-    private String attachments;
+    private String attachments = "";
 
     public MailMessage() {
     }
