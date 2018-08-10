@@ -68,6 +68,11 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private Set<String> nameOfAttachments = new HashSet<>();
     private long attachmentNumber = 0;
 
+    private String attachmentDirectoryName = "attachments";
+    private String attachmentsPath;
+    private String csvFileName = "Mail_Messages.csv";
+
+
     private GoogleClientSecrets clientSecrets;
     private GoogleAuthorizationCodeFlow flow;
     private Credential credential;
@@ -135,33 +140,44 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             ListMessagesResponse MsgResponse = client.users().messages().list(userId).setQ(query).execute();
 
             List<Message> messages = new ArrayList<>();
-
-            System.out.println("-----------------------------------------------------");
-            System.out.println("Messages found: " + MsgResponse.getMessages().size());
-
             List<MailMessage> mailMessageList = new ArrayList<>();
-            for (Message msg : MsgResponse.getMessages()) {
-                messages.add(msg);
-                Message message = client.users().messages().get(userId, msg.getId()).execute();
 
-                arr.put(message.getSnippet());
+            if (MsgResponse.getMessages() != null) {
 
-                MailMessage mailMessage = compileMailMessage(message);
-                mailMessageList.add(mailMessage);
-                rawMessages.put(mailMessage);
+                System.out.println("-----------------------------------------------------");
+                System.out.println("Messages found: " + MsgResponse.getMessages().size());
+                createStorage(directoryPath);
 
-                /*
-                 * if (MsgResponse.getNextPageToken() != null) { String
-                 * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
-                 * client.users().messages().list(userId).setQ(query).
-                 * setPageToken(pageToken).execute(); } else { break; }
-                 */
+                for (Message msg : MsgResponse.getMessages()) {
+                    messages.add(msg);
+                    Message message = client.users().messages().get(userId, msg.getId()).execute();
+
+                    arr.put(message.getSnippet());
+
+                    MailMessage mailMessage = compileMailMessage(message);
+                    mailMessageList.add(mailMessage);
+                    rawMessages.put(mailMessage);
+
+                    /*
+                     * if (MsgResponse.getNextPageToken() != null) { String
+                     * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
+                     * client.users().messages().list(userId).setQ(query).
+                     * setPageToken(pageToken).execute(); } else { break; }
+                     */
+                }
+                rawMsgReq.put("messages", rawMessages);
+
+
+                String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
+                System.out.println("Attachments are stored in \n\t"
+                        + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
+
+                String filePath = directoryPath + "/" + csvFileName;
+                CSVFileWriter.writeCSVFile(filePath, mailMessageList);
+
+                System.out.println("Messages are stored in CSV file \n\t"
+                        + Paths.get(filePath).toAbsolutePath().toString());
             }
-            rawMsgReq.put("messages", rawMessages);
-
-            CSVFileWriter.writeCSVFile(directoryPath + "Mail_Messages.csv", mailMessageList);
-            System.out.println("Attachments are stored");
-            System.out.println("Messages are stored in CSV file");
             System.out.println("Total messages processed: " + mailMessageList.size());
             System.out.println("-----------------------------------------------------");
         } catch (Exception e) {
@@ -256,15 +272,24 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         Base64 base64Url = new Base64(true);
         byte[] fileByteArray = base64Url.decodeBase64(attachPart.getData());
 
-        Path path = Paths.get(directoryPath);
-        if (!Files.exists(path)) {
-            Files.createDirectories(path);
+        String filePath = directoryPath + "/" + filename;
+        try (FileOutputStream fileOutFile = new FileOutputStream(filePath)) {
+            fileOutFile.write(fileByteArray);
         }
+    }
 
-        FileOutputStream fileOutFile =
-                new FileOutputStream(directoryPath + filename);
-        fileOutFile.write(fileByteArray);
-        fileOutFile.close();
+    private void createStorage(String directoryPath) {
+        attachmentsPath = directoryPath + "/" + attachmentDirectoryName;
+        Path path = Paths.get(attachmentsPath);
+
+        if (!Files.exists(path)) {
+            try {
+                Files.createDirectories(path);
+                System.out.println("Storage created " + Paths.get(attachmentsPath).toAbsolutePath().toString());
+            } catch (IOException e) {
+                System.out.println("Storage creating process FAIL \n" + "Exception: " + e.getMessage());
+            }
+        }
     }
 
     private MailMessage compileMailMessage(Message message) throws IOException, MessagingException {
@@ -321,7 +346,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
                 // saving attachment file to local storage
                 storeAttachments(client, userId, messageId, attachmentId,
-                        attachmentFilename, directoryPath + "attachments/");
+                        attachmentFilename, attachmentsPath);
             }
         }
 
