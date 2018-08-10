@@ -1,17 +1,17 @@
 package com.api.model;
 
 public class MailMessage {
-    private String id;
+    private String id = "";
 
-    private String date;
+    private String date = "";
 
-    private String from;
+    private String from = "";
 
-    private String to;
+    private String to = "";
 
-    private String subject;
+    private String subject = "";
 
-    private String snippet;
+    private String snippet = "";
 
     private String attachments = "";
 

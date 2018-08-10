@@ -20,9 +20,11 @@ import com.google.api.services.gmail.GmailScopes;
 import com.google.api.services.gmail.model.Label;
 import com.google.api.services.gmail.model.ListLabelsResponse;
 import com.google.api.services.gmail.model.ListMessagesResponse;
+import com.google.api.services.gmail.model.ListThreadsResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
+import com.google.api.services.gmail.model.Thread;
 import lombok.extern.java.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -42,7 +44,6 @@ import javax.mail.MessagingException;
 import javax.mail.Session;
 import javax.mail.internet.MimeMessage;
 import javax.servlet.http.HttpServletRequest;
-
 import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
@@ -52,8 +53,12 @@ import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -83,6 +88,8 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private Credential credential;
 
     private long mailCounter;
+
+    private List<String> labelIds = new ArrayList<>();
 
     private String userId = "me";
 
@@ -154,22 +161,55 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 System.out.println("Generated query is " + labelsGroup);
                 query = labelsGroup;
             }
+            System.out.println("Search query" + query);
+
+//            if (!labelIds.isEmpty()) {
+//                listThreadsMatchingQuery(client, userId, query);
+//                listThreadsWithLabels(client, userId, labelIds);
+//            }
+
+//            BatchRequest batchRequest = client.batch();
+//            JsonBatchCallback<Thread> callback = new JsonBatchCallback<Thread>() {
+//
+//                @Override
+//                public void onSuccess(Thread t, HttpHeaders responseHeaders)
+//                        throws IOException {
+//                    System.out.println(t.getMessages().get(0).getPayload().getBody().getData());
+//                }
+//
+//                @Override
+//                public void onFailure(GoogleJsonError e, HttpHeaders responseHeaders)
+//                        throws IOException {
+//
+//                }
+//            };
+//
+//            client.users().threads().get(userId, thread.getId()).queue(batchRequest, callback);
+//
+//
+//            batchRequest.execute();
 
 
             {
 
-                MsgResponse = client.users().messages().list(userId).setQ(query).execute();
+
+                List<Message> listOfMessages = listMessagesMatchingQuery(client, userId, query);
+
+//                MsgResponse = client.users().messages().list(userId).setQ(query).execute();
                 List<Message> messages = new ArrayList<>();
                 List<MailMessage> mailMessageList = new ArrayList<>();
 
-                if (MsgResponse.getMessages() != null) {
+//                List<Message> listOfMessages = MsgResponse.getMessages();
+
+
+                if (listOfMessages != null) {
 
                     System.out.println("-----------------------------------------------------");
-                    System.out.println("Messages found: " + MsgResponse.getMessages().size());
+                    System.out.println("Messages found: " + listOfMessages.size());
                     createStorage(directoryPath);
 
 
-                    for (Message msg : MsgResponse.getMessages()) {
+                    for (Message msg : listOfMessages) {
                         messages.add(msg);
                         Message message = client.users().messages().get(userId, msg.getId()).execute();
 
@@ -312,6 +352,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 System.out.println("Storage created " + Paths.get(attachmentsPath).toAbsolutePath().toString());
             } catch (IOException e) {
                 System.out.println("Storage creating process FAIL \n" + "Exception: " + e.getMessage());
+                e.printStackTrace();
             }
         }
     }
@@ -386,7 +427,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
 
 //        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
-        System.out.println("Mail massage " + ++mailCounter);
+        System.out.println("Mail massage #" + ++mailCounter);
 
         return mailMessage;
     }
@@ -437,6 +478,10 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                     .filter(l -> l.startsWith(basicLabel))
                     .collect(Collectors.joining("|"));
 
+            labelIds = labels.stream().filter(l -> l.getName().startsWith(basicLabel))
+                    .map(l -> l.getId())
+                    .collect(Collectors.toList());
+
             if (labels.isEmpty()) {
                 System.out.println("No labels found.");
             } else {
@@ -465,4 +510,134 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         }
         return result;
     }
+
+    /**
+     * List all Threads of the user's mailbox with labelIds applied.
+     *
+     * @param service  Authorized Gmail API instance.
+     * @param userId   User's email address. The special value "me"
+     *                 can be used to indicate the authenticated user.
+     * @param labelIds String used to filter the Threads listed.
+     * @throws IOException
+     */
+    public static void listThreadsWithLabels(Gmail service, String userId,
+                                             List<String> labelIds) throws IOException {
+        ListThreadsResponse response = service.users().threads().list(userId).setLabelIds(labelIds).execute();
+        List<Thread> threads = new ArrayList<Thread>();
+        while (response.getThreads() != null) {
+            threads.addAll(response.getThreads());
+            if (response.getNextPageToken() != null) {
+                String pageToken = response.getNextPageToken();
+                response = service.users().threads().list(userId).setLabelIds(labelIds)
+                        .setPageToken(pageToken).execute();
+            } else {
+                break;
+            }
+        }
+
+        for (Thread thread : threads) {
+            System.out.println(thread.toPrettyString());
+
+            List<Message> messages = thread.getMessages();
+        }
+    }
+
+    private void printMessages(List<Message> listOfMessages) {
+        try {
+            if (listOfMessages != null) {
+
+                List<MailMessage> newMailMessagesList = new ArrayList<>();
+                System.out.println("-----------------------------------------------------");
+                System.out.println("Messages found: " + listOfMessages.size());
+                createStorage(directoryPath);
+
+                int counter = 0;
+                for (Message msg : listOfMessages) {
+                    Message message = client.users().messages().get(userId, msg.getId()).execute();
+                    MailMessage mailMessage = compileMailMessage(message);
+                    newMailMessagesList.add(mailMessage);
+                    System.out.println("message \t" + ++counter);
+                }
+
+
+                String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
+                System.out.println("Attachments are stored in \n\t"
+                        + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
+
+                String filePath = directoryPath + "/" + csvFileName;
+                CSVFileWriter.writeCSVFile(filePath, newMailMessagesList);
+
+                System.out.println("Messages are stored in CSV file \n\t"
+                        + Paths.get(filePath).toAbsolutePath().toString());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * List all Threads of the user's mailbox matching the query.
+     *
+     * @param service Authorized Gmail API instance.
+     * @param userId  User's email address. The special value "me"
+     *                can be used to indicate the authenticated user.
+     * @param query   String used to filter the Threads listed.
+     * @throws IOException
+     */
+    public static void listThreadsMatchingQuery(Gmail service, String userId,
+                                                String query) throws IOException {
+        ListThreadsResponse response = service.users().threads().list(userId).setQ(query).execute();
+        List<Thread> threads = new ArrayList<Thread>();
+        while (response.getThreads() != null) {
+            threads.addAll(response.getThreads());
+            if (response.getNextPageToken() != null) {
+                String pageToken = response.getNextPageToken();
+                response = service.users().threads().list(userId).setQ(query).setPageToken(pageToken).execute();
+            } else {
+                break;
+            }
+        }
+
+        List<Thread> threadsWithMsg = threads.stream()
+                .filter(t -> (t.getMessages() != null && !t.getMessages().isEmpty()))
+                .collect(Collectors.toList());
+
+        for (Thread thread : threadsWithMsg) {
+            System.out.println(thread.toPrettyString());
+        }
+    }
+
+
+    /**
+     * List all Messages of the user's mailbox matching the query.
+     *
+     * @param service Authorized Gmail API instance.
+     * @param userId  User's email address. The special value "me"
+     *                can be used to indicate the authenticated user.
+     * @param query   String used to filter the Messages listed.
+     * @throws IOException
+     */
+    public static List<Message> listMessagesMatchingQuery(Gmail service, String userId,
+                                                          String query) throws IOException {
+        ListMessagesResponse response = service.users().messages().list(userId).setQ(query).execute();
+
+        List<Message> messages = new ArrayList<Message>();
+        while (response.getMessages() != null) {
+            messages.addAll(response.getMessages());
+            if (response.getNextPageToken() != null) {
+                String pageToken = response.getNextPageToken();
+                response = service.users().messages().list(userId).setQ(query)
+                        .setPageToken(pageToken).execute();
+            } else {
+                break;
+            }
+        }
+
+
+        return messages;
+    }
+
+
 }
