@@ -25,8 +25,6 @@ import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
 import com.google.api.services.gmail.model.Thread;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.extern.java.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -52,12 +50,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
@@ -93,6 +93,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private long mailCounter;
 
     private List<String> labelIds = new ArrayList<>();
+    JSONArray rawMessages = new JSONArray();
 
     private String userId = "me";
 
@@ -129,7 +130,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     public ResponseEntity<String> oauth2Callback(@RequestParam(value = "code") String code) throws IOException {
 
         JSONObject rawMsgReq = new JSONObject();
-        JSONArray rawMessages = new JSONArray();
+
 
         mailCounter = 0;
 
@@ -158,7 +159,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
             String basicLabel = getBasicLabelForMultipleLabels(query);
 
-                query = getQueryForMultipleLabelsSearching(client, userId, basicLabel);
+            query = getQueryForMultipleLabelsSearching(client, userId, basicLabel);
 
             log.info("Searching query: " + query);
 
@@ -168,7 +169,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 List<Message> listOfMessages = listMessagesMatchingQuery(client, userId, query);
 
 //                MsgResponse = client.users().messages().list(userId).setQ(query).execute();
-                List<Message> messages = new ArrayList<>();
+//                List<Message> messages = new ArrayList<>();
                 List<MailMessage> mailMessageList = new ArrayList<>();
 
 //                List<Message> listOfMessages = MsgResponse.getMessages();
@@ -182,40 +183,23 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
                     mailMessageList = listOfMessages.parallelStream()
                             .map(m -> {
-                                messages.add(m);
-                                MailMessage mailMessage = null;
+//                                messages.add(m);
+
                                 try {
                                     Message message = client.users().messages().get(userId, m.getId()).execute();
-                                    mailMessage = compileMailMessage(message);
-                                } catch (IOException e) {
+                                    return compileMailMessage(message);
+                                } catch (IOException | MessagingException e) {
                                     e.printStackTrace();
-                                } catch (MessagingException e) {
-                                    e.printStackTrace();
+                                    return null;
                                 }
 //                                mailMessageList.add(mailMessage);
-                                rawMessages.put(mailMessage);
-                                return mailMessage;
+//                                rawMessages.put(mailMessage);
+
                             })
+                            .filter(Objects::nonNull)
                             .collect(Collectors.toList());
 
-
-//                    for (Message msg : listOfMessages) {
-//                        messages.add(msg);
-//                        Message message = client.users().messages().get(userId, msg.getId()).execute();
-//
-//                        MailMessage mailMessage = compileMailMessage(message);
-//                        mailMessageList.add(mailMessage);
-//                        rawMessages.put(mailMessage);
-//
-//                        /*
-//                         * if (MsgResponse.getNextPageToken() != null) { String
-//                         * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
-//                         * client.users().messages().list(userId).setQ(query).
-//                         * setPageToken(pageToken).execute(); } else { break; }
-//                         */
-//                    }
                     rawMsgReq.put("messages", rawMessages);
-
 
                     String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
                     System.out.println("Attachments are stored in \n\t"
@@ -325,9 +309,10 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             } else {
                 if (!basicLabel.isEmpty()) {
                     multipleLabels = labels.stream()
-                            .map(l -> {String name = l.getName();
-                            name.replaceAll("[\\s\\-()]", "_");
-                            return name;
+                            .map(l -> {
+                                String name = l.getName();
+                                name.replaceAll("[\\s\\-()]", "_");
+                                return name;
                             })
                             .filter(l -> l.contains(basicLabel))
                             .collect(Collectors.joining("|"));
@@ -424,16 +409,35 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
         MailMessage mailMessage = new MailMessage();
 
-            JsonNode messageNode;
-            ObjectMapper mapper = new ObjectMapper();
-            messageNode = mapper.readTree(message.toPrettyString());
+        JsonNode messageNode;
+        ObjectMapper mapper = new ObjectMapper();
+        messageNode = mapper.readTree(message.toPrettyString());
 
-            // getting message id
-            String messageId = messageNode.get("id").asText();
-            mailMessage.setId(messageId);
+        rawMessages.put(messageNode);
+
+        // setting message id
+        mailMessage.setId(message.getId());
 
         // getting snippet
-        mailMessage.setSnippet(messageNode.get("snippet").asText());
+//        mailMessage.setSnippet(messageNode.get("snippet").asText());
+//--------------------------------------------------------------------------------------------------------
+        MessagePart payload = message.getPayload();
+        String mailBody = "";
+        if ("multipart/alternative".equals(payload.getMimeType())) {
+            List<String> payloadParts = payload.getParts().stream()
+                    .filter(p -> "text/plain".equals(p.getMimeType()))
+                    .map(p -> new String(p.getBody().decodeData(),StandardCharsets.UTF_8))
+                    .collect(Collectors.toList());
+
+            if (!payloadParts.isEmpty()) {
+                mailBody = payloadParts.get(0);
+            }
+        } else if ("text/plain".equals(payload.getMimeType())) {
+            mailBody = new String(payload.getBody().decodeData(),StandardCharsets.UTF_8);
+        }
+
+        mailMessage.setSnippet(mailBody);
+//--------------------------------------------------------------------------------------------------------
 
         // getting date
         JsonNode messagePayloadNode = messageNode.get("payload");
@@ -475,7 +479,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                     mailAttachmentFileNames = mailAttachmentFileNames + " " + attachmentFilename;
 
                     // saving attachment file to local storage
-                    storeAttachments(client, userId, messageId, attachmentId,
+                    storeAttachments(client, userId, message.getId(), attachmentId,
                             attachmentFilename, attachmentsPath);
                 }
             }
@@ -493,6 +497,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
 //        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
         System.out.println("Mail massage #" + ++mailCounter);
+//        System.out.println("Mail massage id: " + message.getId());
 
         return mailMessage;
     }
@@ -628,4 +633,5 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             System.out.println(thread.toPrettyString());
         }
     }
+
 }
