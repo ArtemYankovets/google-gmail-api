@@ -72,6 +72,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private static final String APPLICATION_NAME = "SDK mail messages export project";
     private static final String HEADERS = "headers";
     private static final String VALUE = "value";
+    private static final String REGEX_VALUE_IN_PARENTHESES = "\\((.*?)\\)";
     private static HttpTransport httpTransport;
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
     private static com.google.api.services.gmail.Gmail client;
@@ -113,7 +114,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
-        System.out.println("Application started ... launching browser now");
+        log.info("Application started ... launching browser now");
         launchBrowser(startUri);
     }
 
@@ -125,9 +126,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     @RequestMapping(value = "/login/gmailCallback", method = RequestMethod.GET, params = "code")
     public ResponseEntity<String> oauth2Callback(@RequestParam(value = "code") String code) throws IOException {
 
-        JSONObject json = new JSONObject();
-        JSONArray arr = new JSONArray();
-
         JSONObject rawMsgReq = new JSONObject();
         JSONArray rawMessages = new JSONArray();
 
@@ -136,8 +134,9 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         try {
 
             TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectUri).execute();
-            credential = flow.createAndStoreCredential(response, "userID");
+            log.info("Token Received");
 
+            credential = flow.createAndStoreCredential(response, "userID");
             client = new com.google.api.services.gmail.Gmail.Builder(httpTransport, JSON_FACTORY, credential)
                     .setApplicationName(APPLICATION_NAME).build();
 
@@ -153,42 +152,13 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
 //			String query = "subject:'SDK Test message'";
 
-            ListMessagesResponse MsgResponse;
+//            ListMessagesResponse MsgResponse;
 
-            String basicLabel = containsMultipleLabels(query);
-            if (!basicLabel.isEmpty()) {
-                String labelsGroup = getLabels(client, userId, basicLabel);
-                System.out.println("Generated query is " + labelsGroup);
-                query = labelsGroup;
-            }
-            System.out.println("Search query" + query);
+            String basicLabel = getBasicLabelForMultipleLabels(query);
 
-//            if (!labelIds.isEmpty()) {
-//                listThreadsMatchingQuery(client, userId, query);
-//                listThreadsWithLabels(client, userId, labelIds);
-//            }
+                query = getQueryForMultipleLabelsSearching(client, userId, basicLabel);
 
-//            BatchRequest batchRequest = client.batch();
-//            JsonBatchCallback<Thread> callback = new JsonBatchCallback<Thread>() {
-//
-//                @Override
-//                public void onSuccess(Thread t, HttpHeaders responseHeaders)
-//                        throws IOException {
-//                    System.out.println(t.getMessages().get(0).getPayload().getBody().getData());
-//                }
-//
-//                @Override
-//                public void onFailure(GoogleJsonError e, HttpHeaders responseHeaders)
-//                        throws IOException {
-//
-//                }
-//            };
-//
-//            client.users().threads().get(userId, thread.getId()).queue(batchRequest, callback);
-//
-//
-//            batchRequest.execute();
-
+            log.info("Searching query: " + query);
 
             {
 
@@ -212,8 +182,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                     for (Message msg : listOfMessages) {
                         messages.add(msg);
                         Message message = client.users().messages().get(userId, msg.getId()).execute();
-
-                        arr.put(message.getSnippet());
 
                         MailMessage mailMessage = compileMailMessage(message);
                         mailMessageList.add(mailMessage);
@@ -253,29 +221,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         return new ResponseEntity<>(rawMsgReq.toString(), HttpStatus.OK);
     }
 
-    private String authorize() throws Exception {
-        AuthorizationCodeRequestUrl authorizationUrl;
-        if (flow == null) {
-            Details web = new Details();
-            web.setClientId(clientId);
-            web.setClientSecret(clientSecret);
-            clientSecrets = new GoogleClientSecrets().setWeb(web);
-            httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-
-            List<String> listOfScopes = new ArrayList<>();
-            listOfScopes.add(GmailScopes.MAIL_GOOGLE_COM);
-            listOfScopes.add(GmailScopes.GMAIL_MODIFY);
-            listOfScopes.add(GmailScopes.GMAIL_READONLY);
-
-            flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
-                    new ArrayList<>(listOfScopes)).build();
-        }
-        authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectUri);
-
-        System.out.println("Gmail authorizationUrl ->" + authorizationUrl);
-        return authorizationUrl.build();
-    }
-
     private void launchBrowser(String url) {
         if (Desktop.isDesktopSupported()) {
             Desktop desktop = Desktop.getDesktop();
@@ -289,7 +234,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
             // http://lopica.sourceforge.net/os.html
             String os = System.getProperty("os.name").toLowerCase();
-
             try {
                 if (os.contains("win")) {
                     // do not support links by format "leodev.html#someTag"
@@ -313,6 +257,101 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 e.printStackTrace();
             }
         }
+    }
+
+    private String authorize() throws Exception {
+        AuthorizationCodeRequestUrl authorizationUrl;
+        if (flow == null) {
+            Details web = new Details();
+            web.setClientId(clientId);
+            web.setClientSecret(clientSecret);
+            clientSecrets = new GoogleClientSecrets().setWeb(web);
+            httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+
+            List<String> listOfScopes = new ArrayList<>();
+            listOfScopes.add(GmailScopes.MAIL_GOOGLE_COM);
+            listOfScopes.add(GmailScopes.GMAIL_MODIFY);
+            listOfScopes.add(GmailScopes.GMAIL_READONLY);
+
+            flow = new GoogleAuthorizationCodeFlow.Builder(httpTransport, JSON_FACTORY, clientSecrets,
+                    new ArrayList<>(listOfScopes)).build();
+        }
+        authorizationUrl = flow.newAuthorizationUrl().setRedirectUri(redirectUri);
+
+        log.info("Gmail authorizationUrl -> " + authorizationUrl);
+        return authorizationUrl.build();
+    }
+
+    private String getBasicLabelForMultipleLabels(String basicQuery) {
+        String basicLabel = "";
+        String basicLabelInQuery;
+        Matcher m = Pattern.compile(REGEX_VALUE_IN_PARENTHESES).matcher(basicQuery);
+        if (m.find()) {
+            basicLabelInQuery = m.group(1);
+            if (basicLabelInQuery.contains("*")) {
+                basicLabel = basicLabelInQuery.substring(0, basicLabelInQuery.length() - 1);
+            }
+        }
+        return basicLabel;
+    }
+
+    private String getQueryForMultipleLabelsSearching(Gmail service, String userId, String basicLabel) {
+        String multipleLabels = "";
+        try {
+            ListLabelsResponse listResponse = service.users().labels().list(userId).execute();
+            List<Label> labels = listResponse.getLabels();
+            if (labels.isEmpty()) {
+                log.info("No labels found.");
+            } else {
+                if (!basicLabel.isEmpty()) {
+                    multipleLabels = labels.stream()
+                            .map(Label::getName)
+                            .filter(l -> l.startsWith(basicLabel))
+                            .collect(Collectors.joining("|"));
+                }
+                log.info("Labels:");
+                for (Label label : labels) {
+                    log.info(String.format("\t%s", label.getName()));
+                }
+            }
+        } catch (IOException e) {
+            log.warning("Get labels list request fail." + System.lineSeparator() +
+                    "Exception message is " + e.getMessage());
+        }
+        String newQuery;
+        if (multipleLabels.isEmpty()) {
+            newQuery = query;
+        } else {
+            newQuery = String.format("'label:(%s)'", multipleLabels);
+        }
+        return newQuery;
+    }
+
+    /**
+     * List all Messages of the user's mailbox matching the query.
+     *
+     * @param service Authorized Gmail API instance.
+     * @param userId  User's email address. The special value "me"
+     *                can be used to indicate the authenticated user.
+     * @param query   String used to filter the Messages listed.
+     * @throws IOException
+     */
+    public static List<Message> listMessagesMatchingQuery(Gmail service, String userId,
+                                                          String query) throws IOException {
+        ListMessagesResponse response = service.users().messages().list(userId).setQ(query).execute();
+
+        List<Message> messages = new ArrayList<Message>();
+        while (response.getMessages() != null) {
+            messages.addAll(response.getMessages());
+            if (response.getNextPageToken() != null) {
+                String pageToken = response.getNextPageToken();
+                response = service.users().messages().list(userId).setQ(query)
+                        .setPageToken(pageToken).execute();
+            } else {
+                break;
+            }
+        }
+        return messages;
     }
 
     /**
@@ -358,14 +397,16 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     }
 
     private MailMessage compileMailMessage(Message message) throws IOException, MessagingException {
-        JsonNode messageNode;
-        ObjectMapper mapper = new ObjectMapper();
-        messageNode = mapper.readTree(message.toPrettyString());
 
-        // getting message id
         MailMessage mailMessage = new MailMessage();
-        String messageId = messageNode.get("id").asText();
-        mailMessage.setId(messageId);
+        if (mailCounter > 1700) {
+            JsonNode messageNode;
+            ObjectMapper mapper = new ObjectMapper();
+            messageNode = mapper.readTree(message.toPrettyString());
+
+            // getting message id
+            String messageId = messageNode.get("id").asText();
+            mailMessage.setId(messageId);
 
         // getting snippet
         mailMessage.setSnippet(messageNode.get("snippet").asText());
@@ -388,8 +429,8 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             for (MessagePart part : parts) {
                 String attachmentId = part.getBody().getAttachmentId();
 
-                if (attachmentId != null) {
-                    String attachmentFilename = part.getFilename();
+                String attachmentFilename = part.getFilename();
+                if (attachmentId != null && !attachmentFilename.isEmpty()) {
 
                     String regex = "(.+?)(\\.[^.]*$|$)";
                     String pureFileName = "";
@@ -425,7 +466,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         jsonNode = getJsonNodeByField(messagePayloadNode,
                 HEADERS, "name", "To");
         jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
-
+    }
 //        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
         System.out.println("Mail massage #" + ++mailCounter);
 
@@ -464,51 +505,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         MimeMessage email = new MimeMessage(session, new ByteArrayInputStream(emailBytes));
 
         return email;
-    }
-
-    private String getLabels(Gmail service, String userId, String basicLabel) {
-        String result = "";
-
-        try {
-            ListLabelsResponse listResponse = service.users().labels().list(userId).execute();
-            List<Label> labels = listResponse.getLabels();
-
-            result = labels.stream()
-                    .map(label -> label.getName())
-                    .filter(l -> l.startsWith(basicLabel))
-                    .collect(Collectors.joining("|"));
-
-            labelIds = labels.stream().filter(l -> l.getName().startsWith(basicLabel))
-                    .map(l -> l.getId())
-                    .collect(Collectors.toList());
-
-            if (labels.isEmpty()) {
-                System.out.println("No labels found.");
-            } else {
-                System.out.println("Labels:");
-                for (Label label : labels) {
-                    System.out.printf("- %s\n", label.getName());
-                }
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return String.format("'label:(%s)'", result);
-    }
-
-    private String containsMultipleLabels(String basicQuery) {
-
-        String result = "";
-        String regex = "\\((.*?)\\)";
-        String pureQuery;
-        Matcher m = Pattern.compile(regex).matcher(basicQuery);
-        if (m.find()) {
-            pureQuery = m.group(1);
-            if (pureQuery.contains("*")) {
-                result = pureQuery.substring(0, pureQuery.length() - 1);
-            }
-        }
-        return result;
     }
 
     /**
@@ -609,35 +605,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         }
     }
 
-
-    /**
-     * List all Messages of the user's mailbox matching the query.
-     *
-     * @param service Authorized Gmail API instance.
-     * @param userId  User's email address. The special value "me"
-     *                can be used to indicate the authenticated user.
-     * @param query   String used to filter the Messages listed.
-     * @throws IOException
-     */
-    public static List<Message> listMessagesMatchingQuery(Gmail service, String userId,
-                                                          String query) throws IOException {
-        ListMessagesResponse response = service.users().messages().list(userId).setQ(query).execute();
-
-        List<Message> messages = new ArrayList<Message>();
-        while (response.getMessages() != null) {
-            messages.addAll(response.getMessages());
-            if (response.getNextPageToken() != null) {
-                String pageToken = response.getNextPageToken();
-                response = service.users().messages().list(userId).setQ(query)
-                        .setPageToken(pageToken).execute();
-            } else {
-                break;
-            }
-        }
-
-
-        return messages;
-    }
 
 
 }
