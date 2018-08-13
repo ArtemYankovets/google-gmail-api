@@ -25,6 +25,8 @@ import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
 import com.google.api.services.gmail.model.Thread;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.extern.java.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -178,22 +180,40 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                     System.out.println("Messages found: " + listOfMessages.size());
                     createStorage(directoryPath);
 
+                    mailMessageList = listOfMessages.parallelStream()
+                            .map(m -> {
+                                messages.add(m);
+                                MailMessage mailMessage = null;
+                                try {
+                                    Message message = client.users().messages().get(userId, m.getId()).execute();
+                                    mailMessage = compileMailMessage(message);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                } catch (MessagingException e) {
+                                    e.printStackTrace();
+                                }
+//                                mailMessageList.add(mailMessage);
+                                rawMessages.put(mailMessage);
+                                return mailMessage;
+                            })
+                            .collect(Collectors.toList());
 
-                    for (Message msg : listOfMessages) {
-                        messages.add(msg);
-                        Message message = client.users().messages().get(userId, msg.getId()).execute();
 
-                        MailMessage mailMessage = compileMailMessage(message);
-                        mailMessageList.add(mailMessage);
-                        rawMessages.put(mailMessage);
-
-                        /*
-                         * if (MsgResponse.getNextPageToken() != null) { String
-                         * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
-                         * client.users().messages().list(userId).setQ(query).
-                         * setPageToken(pageToken).execute(); } else { break; }
-                         */
-                    }
+//                    for (Message msg : listOfMessages) {
+//                        messages.add(msg);
+//                        Message message = client.users().messages().get(userId, msg.getId()).execute();
+//
+//                        MailMessage mailMessage = compileMailMessage(message);
+//                        mailMessageList.add(mailMessage);
+//                        rawMessages.put(mailMessage);
+//
+//                        /*
+//                         * if (MsgResponse.getNextPageToken() != null) { String
+//                         * pageToken = MsgResponse.getNextPageToken(); MsgResponse =
+//                         * client.users().messages().list(userId).setQ(query).
+//                         * setPageToken(pageToken).execute(); } else { break; }
+//                         */
+//                    }
                     rawMsgReq.put("messages", rawMessages);
 
 
@@ -305,13 +325,17 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             } else {
                 if (!basicLabel.isEmpty()) {
                     multipleLabels = labels.stream()
-                            .map(Label::getName)
-                            .filter(l -> l.startsWith(basicLabel))
+                            .map(l -> {String name = l.getName();
+                            name.replaceAll("[\\s\\-()]", "_");
+                            return name;
+                            })
+                            .filter(l -> l.contains(basicLabel))
                             .collect(Collectors.joining("|"));
+
                 }
                 log.info("Labels:");
                 for (Label label : labels) {
-                    log.info(String.format("\t%s", label.getName()));
+                    log.info(String.format("\t%s\t\tid = %s", label.getName(), label.getId()));
                 }
             }
         } catch (IOException e) {
@@ -399,7 +423,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private MailMessage compileMailMessage(Message message) throws IOException, MessagingException {
 
         MailMessage mailMessage = new MailMessage();
-        if (mailCounter > 1700) {
+
             JsonNode messageNode;
             ObjectMapper mapper = new ObjectMapper();
             messageNode = mapper.readTree(message.toPrettyString());
@@ -466,7 +490,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         jsonNode = getJsonNodeByField(messagePayloadNode,
                 HEADERS, "name", "To");
         jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
-    }
+
 //        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
         System.out.println("Mail massage #" + ++mailCounter);
 
@@ -604,7 +628,4 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             System.out.println(thread.toPrettyString());
         }
     }
-
-
-
 }
