@@ -11,20 +11,20 @@ public class MailMessage {
 
     private String subject = "";
 
-    private String snippet = "";
+    private String body = "";
 
     private String attachments = "";
 
     public MailMessage() {
     }
 
-    public MailMessage(String id, String date, String from, String to, String subject, String snippet, String attachments) {
+    public MailMessage(String id, String date, String from, String to, String subject, String body, String attachments) {
         this.id = id;
         this.date = date;
         this.from = from;
         this.to = to;
         this.subject = subject;
-        this.snippet = snippet;
+        this.body = body;
         this.attachments = attachments;
     }
 
@@ -44,12 +44,12 @@ public class MailMessage {
         this.subject = subject;
     }
 
-    public String getSnippet() {
-        return snippet;
+    public String getBody() {
+        return body;
     }
 
-    public void setSnippet(String snippet) {
-        this.snippet = snippet;
+    public void setBody(String body) {
+        this.body = body;
     }
 
     public String getAttachments() {
@@ -92,7 +92,7 @@ public class MailMessage {
                 ", from='" + from + '\'' +
                 ", to='" + to + '\'' +
                 ", subject='" + subject + '\'' +
-                ", snippet='" + snippet + '\'' +
+                ", body='" + body + '\'' +
                 ", attachments='" + attachments + '\'' +
                 '}';
     }

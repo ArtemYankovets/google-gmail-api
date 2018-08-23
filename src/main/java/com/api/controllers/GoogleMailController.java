@@ -20,11 +20,9 @@ import com.google.api.services.gmail.GmailScopes;
 import com.google.api.services.gmail.model.Label;
 import com.google.api.services.gmail.model.ListLabelsResponse;
 import com.google.api.services.gmail.model.ListMessagesResponse;
-import com.google.api.services.gmail.model.ListThreadsResponse;
 import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartBody;
-import com.google.api.services.gmail.model.Thread;
 import lombok.extern.java.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -41,11 +39,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
 import javax.mail.MessagingException;
-import javax.mail.Session;
-import javax.mail.internet.MimeMessage;
 import javax.servlet.http.HttpServletRequest;
 import java.awt.*;
-import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -59,7 +54,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -74,7 +68,6 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private static final String APPLICATION_NAME = "SDK mail messages export project";
     private static final String HEADERS = "headers";
     private static final String VALUE = "value";
-    private static final String REGEX_VALUE_IN_PARENTHESES = "\\((.*?)\\)";
     private static HttpTransport httpTransport;
     private static final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
     private static com.google.api.services.gmail.Gmail client;
@@ -82,9 +75,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private Set<String> nameOfAttachments = new HashSet<>();
     private long attachmentNumber = 0;
 
-    private String attachmentDirectoryName = "attachments";
     private String attachmentsPath;
-    private String csvFileName = "Mail_Messages.csv";
 
     private GoogleClientSecrets clientSecrets;
     private GoogleAuthorizationCodeFlow flow;
@@ -112,8 +103,17 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     @Value("${store.directory.path}")
     private String directoryPath;
 
+    @Value("${store.csv.file.name}")
+    private String csvFileName;
+
+    @Value("${store.attachment.directory.name}")
+    private String attachmentDirectoryName;
+
     @Value("${gmail.filter.query}")
     private String query;
+
+    @Value("${regex.pattern.value.in.parentheses}")
+    private String regexValueInParentheses;
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
@@ -131,11 +131,9 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
         JSONObject rawMsgReq = new JSONObject();
 
-
         mailCounter = 0;
 
         try {
-
             TokenResponse response = flow.newTokenRequest(code).setRedirectUri(redirectUri).execute();
             log.info("Token Received");
 
@@ -143,80 +141,60 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             client = new com.google.api.services.gmail.Gmail.Builder(httpTransport, JSON_FACTORY, credential)
                     .setApplicationName(APPLICATION_NAME).build();
 
-            /*
-             * Filter filter = new Filter().setCriteria(new
-             * FilterCriteria().setFrom("a2cart.com@gmail.com"))
-             * .setAction(new FilterAction()); Filter result =
-             * client.users().settings().filters().create("me",
-             * filter).execute();
-             *
-             * System.out.println("Created filter " + result.getId());
-             */
-
-//			String query = "subject:'SDK Test message'";
-
-//            ListMessagesResponse MsgResponse;
-
             String basicLabel = getBasicLabelForMultipleLabels(query);
 
             query = getQueryForMultipleLabelsSearching(client, userId, basicLabel);
 
             log.info("Searching query: " + query);
 
-            {
+            final long startTime = System.currentTimeMillis();
+            log.info("-----------------------------------------------------");
 
+            List<Message> listOfMessages = listMessagesMatchingQuery(client, userId, query);
 
-                List<Message> listOfMessages = listMessagesMatchingQuery(client, userId, query);
+            List<MailMessage> mailMessageList = new ArrayList<>();
 
-//                MsgResponse = client.users().messages().list(userId).setQ(query).execute();
-//                List<Message> messages = new ArrayList<>();
-                List<MailMessage> mailMessageList = new ArrayList<>();
+            if (listOfMessages != null) {
 
-//                List<Message> listOfMessages = MsgResponse.getMessages();
+                log.info("Messages found: " + listOfMessages.size());
+                createStorage(directoryPath);
 
+                mailMessageList = listOfMessages.parallelStream()
+                        .map(m -> {
 
-                if (listOfMessages != null) {
+                            try {
+                                Message message = client.users().messages().get(userId, m.getId()).execute();
+                                return compileMailMessage(message);
+                            } catch (IOException | MessagingException e) {
+                                e.printStackTrace();
+                                return null;
+                            }
 
-                    System.out.println("-----------------------------------------------------");
-                    System.out.println("Messages found: " + listOfMessages.size());
-                    createStorage(directoryPath);
+                        })
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
 
-                    mailMessageList = listOfMessages.parallelStream()
-                            .map(m -> {
-//                                messages.add(m);
+                rawMsgReq.put("messages", rawMessages);
 
-                                try {
-                                    Message message = client.users().messages().get(userId, m.getId()).execute();
-                                    return compileMailMessage(message);
-                                } catch (IOException | MessagingException e) {
-                                    e.printStackTrace();
-                                    return null;
-                                }
-//                                mailMessageList.add(mailMessage);
-//                                rawMessages.put(mailMessage);
+                String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
+                log.info("Mail attachments are stored in \t"
+                        + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
 
-                            })
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
+                String filePath = directoryPath + "/" + csvFileName;
+                CSVFileWriter.writeCSVFile(filePath, mailMessageList);
 
-                    rawMsgReq.put("messages", rawMessages);
-
-                    String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
-                    System.out.println("Attachments are stored in \n\t"
-                            + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
-
-                    String filePath = directoryPath + "/" + csvFileName;
-                    CSVFileWriter.writeCSVFile(filePath, mailMessageList);
-
-                    System.out.println("Messages are stored in CSV file \n\t"
-                            + Paths.get(filePath).toAbsolutePath().toString());
-                }
-                System.out.println("Total messages processed: " + mailMessageList.size());
-                System.out.println("next page");
+                log.info("Messages are stored in CSV file \t"
+                        + Paths.get(filePath).toAbsolutePath().toString());
+            } else {
+                log.info("Messages not found ");
             }
-            System.out.println("-----------------------------------------------------");
+            log.info("-----------------------------------------------------");
+            final long endTime = System.currentTimeMillis();
+            log.info("Total messages processed: " + mailMessageList.size());
+            log.info("Total execution time: " + (endTime - startTime));
+            log.info("-----------------------------------------------------");
         } catch (Exception e) {
-            System.out.println("exception cached: " + e.getMessage());
+            log.warning("exception cached: " + e.getMessage());
             e.printStackTrace();
         } finally {
             System.exit(0);
@@ -258,7 +236,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                     return;
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                log.warning("exception cached: " + e.getMessage());
             }
         }
     }
@@ -289,7 +267,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
     private String getBasicLabelForMultipleLabels(String basicQuery) {
         String basicLabel = "";
         String basicLabelInQuery;
-        Matcher m = Pattern.compile(REGEX_VALUE_IN_PARENTHESES).matcher(basicQuery);
+        Matcher m = Pattern.compile(regexValueInParentheses).matcher(basicQuery);
         if (m.find()) {
             basicLabelInQuery = m.group(1);
             if (basicLabelInQuery.contains("*")) {
@@ -318,10 +296,12 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                             .collect(Collectors.joining("|"));
 
                 }
-                log.info("Labels:");
-                for (Label label : labels) {
-                    log.info(String.format("\t%s\t\tid = %s", label.getName(), label.getId()));
-                }
+
+                String collectedLabels = labels.stream().
+                        map(l -> l.getName()).
+                        collect(Collectors.joining(System.lineSeparator() + "\t"));
+
+                log.info(System.lineSeparator() + "Labels: " + System.lineSeparator() + "\t" + collectedLabels);
             }
         } catch (IOException e) {
             log.warning("Get labels list request fail." + System.lineSeparator() +
@@ -397,9 +377,10 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         if (!Files.exists(path)) {
             try {
                 Files.createDirectories(path);
-                System.out.println("Storage created " + Paths.get(attachmentsPath).toAbsolutePath().toString());
+                log.info("Storage created " + Paths.get(attachmentsPath).toAbsolutePath().toString());
             } catch (IOException e) {
-                System.out.println("Storage creating process FAIL \n" + "Exception: " + e.getMessage());
+                log.warning("Storage creating process FAIL" + System.lineSeparator() +
+                        "Exception: " + e.getMessage());
                 e.printStackTrace();
             }
         }
@@ -418,26 +399,23 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
         // setting message id
         mailMessage.setId(message.getId());
 
-        // getting snippet
-//        mailMessage.setSnippet(messageNode.get("snippet").asText());
-//--------------------------------------------------------------------------------------------------------
+        // getting mail body
         MessagePart payload = message.getPayload();
         String mailBody = "";
         if ("multipart/alternative".equals(payload.getMimeType())) {
             List<String> payloadParts = payload.getParts().stream()
                     .filter(p -> "text/plain".equals(p.getMimeType()))
-                    .map(p -> new String(p.getBody().decodeData(),StandardCharsets.UTF_8))
+                    .map(p -> new String(p.getBody().decodeData(), StandardCharsets.UTF_8))
                     .collect(Collectors.toList());
 
             if (!payloadParts.isEmpty()) {
                 mailBody = payloadParts.get(0);
             }
         } else if ("text/plain".equals(payload.getMimeType())) {
-            mailBody = new String(payload.getBody().decodeData(),StandardCharsets.UTF_8);
+            mailBody = new String(payload.getBody().decodeData(), StandardCharsets.UTF_8);
         }
 
-        mailMessage.setSnippet(mailBody);
-//--------------------------------------------------------------------------------------------------------
+        mailMessage.setBody(mailBody);
 
         // getting date
         JsonNode messagePayloadNode = messageNode.get("payload");
@@ -495,9 +473,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 HEADERS, "name", "To");
         jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
 
-//        MimeMessage mimeMessage = getMimeMessage(client, userId, messageId);
-        System.out.println("Mail massage #" + ++mailCounter);
-//        System.out.println("Mail massage id: " + message.getId());
+        log.info("Mail massage #" + ++mailCounter);
 
         return mailMessage;
     }
@@ -508,130 +484,4 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                 .filter(node -> fieldValue.equals(node.get(fieldName).asText()))
                 .findFirst();
     }
-
-
-    /**
-     * Get a Message and use it to create a MimeMessage.
-     *
-     * @param service   Authorized Gmail API instance.
-     * @param userId    User's email address. The special value "me"
-     *                  can be used to indicate the authenticated user.
-     * @param messageId ID of Message to retrieve.
-     * @return MimeMessage MimeMessage populated from retrieved Message.
-     * @throws IOException
-     * @throws MessagingException
-     */
-    private static MimeMessage getMimeMessage(Gmail service, String userId, String messageId)
-            throws IOException, MessagingException {
-        Message message = service.users().messages().get(userId, messageId).setFormat("raw").execute();
-
-        Base64 base64Url = new Base64(true);
-        byte[] emailBytes = base64Url.decodeBase64(message.getRaw());
-
-        Properties props = new Properties();
-        Session session = Session.getDefaultInstance(props, null);
-
-        MimeMessage email = new MimeMessage(session, new ByteArrayInputStream(emailBytes));
-
-        return email;
-    }
-
-    /**
-     * List all Threads of the user's mailbox with labelIds applied.
-     *
-     * @param service  Authorized Gmail API instance.
-     * @param userId   User's email address. The special value "me"
-     *                 can be used to indicate the authenticated user.
-     * @param labelIds String used to filter the Threads listed.
-     * @throws IOException
-     */
-    public static void listThreadsWithLabels(Gmail service, String userId,
-                                             List<String> labelIds) throws IOException {
-        ListThreadsResponse response = service.users().threads().list(userId).setLabelIds(labelIds).execute();
-        List<Thread> threads = new ArrayList<Thread>();
-        while (response.getThreads() != null) {
-            threads.addAll(response.getThreads());
-            if (response.getNextPageToken() != null) {
-                String pageToken = response.getNextPageToken();
-                response = service.users().threads().list(userId).setLabelIds(labelIds)
-                        .setPageToken(pageToken).execute();
-            } else {
-                break;
-            }
-        }
-
-        for (Thread thread : threads) {
-            System.out.println(thread.toPrettyString());
-
-            List<Message> messages = thread.getMessages();
-        }
-    }
-
-    private void printMessages(List<Message> listOfMessages) {
-        try {
-            if (listOfMessages != null) {
-
-                List<MailMessage> newMailMessagesList = new ArrayList<>();
-                System.out.println("-----------------------------------------------------");
-                System.out.println("Messages found: " + listOfMessages.size());
-                createStorage(directoryPath);
-
-                int counter = 0;
-                for (Message msg : listOfMessages) {
-                    Message message = client.users().messages().get(userId, msg.getId()).execute();
-                    MailMessage mailMessage = compileMailMessage(message);
-                    newMailMessagesList.add(mailMessage);
-                    System.out.println("message \t" + ++counter);
-                }
-
-
-                String attachmentDirectoryPath = directoryPath + "/" + attachmentDirectoryName;
-                System.out.println("Attachments are stored in \n\t"
-                        + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
-
-                String filePath = directoryPath + "/" + csvFileName;
-                CSVFileWriter.writeCSVFile(filePath, newMailMessagesList);
-
-                System.out.println("Messages are stored in CSV file \n\t"
-                        + Paths.get(filePath).toAbsolutePath().toString());
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (MessagingException e) {
-            e.printStackTrace();
-        }
-    }
-
-    /**
-     * List all Threads of the user's mailbox matching the query.
-     *
-     * @param service Authorized Gmail API instance.
-     * @param userId  User's email address. The special value "me"
-     *                can be used to indicate the authenticated user.
-     * @param query   String used to filter the Threads listed.
-     * @throws IOException
-     */
-    public static void listThreadsMatchingQuery(Gmail service, String userId,
-                                                String query) throws IOException {
-        ListThreadsResponse response = service.users().threads().list(userId).setQ(query).execute();
-        List<Thread> threads = new ArrayList<Thread>();
-        while (response.getThreads() != null) {
-            threads.addAll(response.getThreads());
-            if (response.getNextPageToken() != null) {
-                String pageToken = response.getNextPageToken();
-                response = service.users().threads().list(userId).setQ(query).setPageToken(pageToken).execute();
-            } else {
-                break;
-            }
-        }
-
-        List<Thread> threadsWithMsg = threads.stream()
-                .filter(t -> (t.getMessages() != null && !t.getMessages().isEmpty()))
-                .collect(Collectors.toList());
-
-        for (Thread thread : threadsWithMsg) {
-            System.out.println(thread.toPrettyString());
-        }
-    }
-
 }

@@ -21,14 +21,14 @@ public class CSVFileWriter {
                 new NotNull(), // from
                 new NotNull(), // to
                 new NotNull(), // subject
-                new NotNull(), // snippet
+                new NotNull(), // body
                 new NotNull()  // attachments
         };
 
         try {
             beanWriter = new CsvBeanWriter(new FileWriter(csvFileName),
                     CsvPreference.STANDARD_PREFERENCE);
-            String[] header = {"id", "date", "from", "to", "subject", "snippet", "attachments"};
+            String[] header = {"id", "date", "from", "to", "subject", "body", "attachments"};
             beanWriter.writeHeader(header);
 
             for (MailMessage aBook : listBooks) {
