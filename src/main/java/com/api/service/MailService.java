@@ -6,6 +6,7 @@ import com.google.api.services.gmail.model.Message;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public interface MailService {
 
@@ -37,7 +38,7 @@ public interface MailService {
                           String userId, String messageId, String attachmentId,
                           String filename, String directoryPath) throws IOException;
 
-    MailMessage compileMailMessage(Gmail service, String userId, Message message) throws IOException;
+    CompletableFuture<MailMessage> compileMailMessage(Gmail service, String userId, Message message);
 
     String getQueryForMultipleLabelsSearching(Gmail service, String userId);
 

@@ -3,7 +3,6 @@ package com.api.controllers;
 import com.api.model.MailMessage;
 import com.api.scv.CSVFileWriter;
 import com.api.service.MailService;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.api.client.auth.oauth2.AuthorizationCodeRequestUrl;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.TokenResponse;
@@ -17,7 +16,6 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.gmail.GmailScopes;
 import com.google.api.services.gmail.model.Message;
 import lombok.extern.java.Log;
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -33,17 +31,17 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
 
-import javax.mail.MessagingException;
 import javax.servlet.http.HttpServletRequest;
 import java.awt.*;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 @Log
 @Controller
@@ -109,13 +107,12 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
 
             List<Message> listOfMessages = mailService.listMessagesMatchingQuery(client, userId, query);
 
-            List<MailMessage> mailMessageList = new ArrayList<>();
-
+            long size = 0;
             if (listOfMessages != null) {
 
                 log.info("Messages found: " + listOfMessages.size());
 
-                mailMessageList = listOfMessages.parallelStream()
+                List<CompletableFuture<MailMessage>> mailMessageList = listOfMessages.parallelStream()
                         .map(m -> {
 
                             try {
@@ -130,12 +127,22 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
                         .filter(Objects::nonNull)
                         .collect(Collectors.toList());
 
+                CompletableFuture<Void> allFutures =
+                        CompletableFuture.allOf(mailMessageList.toArray(new CompletableFuture[listOfMessages.size()]));
+
+                CompletableFuture<List<MailMessage>> listCompletableFuture =
+                        allFutures.thenApply(m -> mailMessageList.stream()
+                                .map((CompletableFuture::join))
+                                .collect(Collectors.toList()));
+
                 String attachmentDirectoryPath = mailService.getAttachmentDirectoryPath();
                 log.info("Mail attachments are stored in "
                         + Paths.get(attachmentDirectoryPath).toAbsolutePath().toString());
 
                 String filePath = mailService.getDirectoryPath() + "/" + csvFileName;
-                CSVFileWriter.writeCSVFile(filePath, mailMessageList);
+                List<MailMessage> mailMessages = listCompletableFuture.get();
+                CSVFileWriter.writeCSVFile(filePath, mailMessages);
+                size = mailMessages.size();
 
                 log.info("Messages are stored in CSV file "
                         + Paths.get(filePath).toAbsolutePath().toString());
@@ -149,15 +156,15 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             log.info(String.format("Total execution time: %s", totalExecutionTime));
             rawMsgReq.put("total_execution_time", totalExecutionTime);
 
-            long totalMessagesProcessed = mailMessageList.size();
+            long totalMessagesProcessed = size;
             log.info(String.format("Total messages processed: %s", totalMessagesProcessed));
             rawMsgReq.put("total_messages_processed", totalMessagesProcessed);
             log.info("-----------------------------------------------------");
         } catch (Exception e) {
             log.warning("exception cached: " + e.getMessage());
-        } /*finally {
+        } finally {
             System.exit(0);
-        }*/
+        }
         return new ResponseEntity<>(rawMsgReq.toString(), HttpStatus.OK);
     }
 
@@ -172,7 +179,7 @@ public class GoogleMailController implements ApplicationListener<ApplicationRead
             try {
                 desktop.browse(new URI(url));
             } catch (IOException | URISyntaxException e) {
-                e.printStackTrace();
+                log.warning(e.getMessage());
             }
         } else {
             Runtime runtime = Runtime.getRuntime();

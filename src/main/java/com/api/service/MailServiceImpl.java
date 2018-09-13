@@ -5,7 +5,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.client.repackaged.org.apache.commons.codec.binary.Base64;
 import com.google.api.services.gmail.Gmail;
-import com.google.api.services.gmail.model.*;
+import com.google.api.services.gmail.model.Label;
+import com.google.api.services.gmail.model.ListLabelsResponse;
+import com.google.api.services.gmail.model.ListMessagesResponse;
+import com.google.api.services.gmail.model.Message;
+import com.google.api.services.gmail.model.MessagePart;
+import com.google.api.services.gmail.model.MessagePartBody;
 import lombok.Getter;
 import lombok.extern.java.Log;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,7 +24,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -64,6 +74,7 @@ public class MailServiceImpl implements MailService {
 
     public List<Message> listMessagesMatchingQuery(Gmail service, String userId,
                                                    String query) throws IOException {
+
         ListMessagesResponse response = service.users().messages().list(userId).setQ(query).execute();
 
         List<Message> messages = new ArrayList<>();
@@ -94,94 +105,105 @@ public class MailServiceImpl implements MailService {
         }
     }
 
-    public MailMessage compileMailMessage(Gmail client, String userId, Message message) throws IOException {
+    public CompletableFuture<MailMessage> compileMailMessage(Gmail client, String userId, Message message) {
 
-        MailMessage mailMessage = new MailMessage();
+        return CompletableFuture.supplyAsync(() -> {
+            MailMessage mailMessage = new MailMessage();
 
-        JsonNode messageNode;
-        ObjectMapper mapper = new ObjectMapper();
-        messageNode = mapper.readTree(message.toPrettyString());
-
-        // setting message id
-        mailMessage.setId(message.getId());
-
-        // getting mail body
-        MessagePart payload = message.getPayload();
-        String mailBody = "";
-        if ("multipart/alternative".equals(payload.getMimeType())) {
-            List<String> payloadParts = payload.getParts().stream()
-                    .filter(p -> "text/plain".equals(p.getMimeType()))
-                    .map(p -> new String(p.getBody().decodeData(), StandardCharsets.UTF_8))
-                    .collect(Collectors.toList());
-
-            if (!payloadParts.isEmpty()) {
-                mailBody = payloadParts.get(0);
+            JsonNode messageNode = null;
+            ObjectMapper mapper = new ObjectMapper();
+            try {
+                messageNode = mapper.readTree(message.toPrettyString());
+            } catch (IOException e) {
+                log.warning(e.getMessage());
             }
-        } else if ("text/plain".equals(payload.getMimeType())) {
-            mailBody = new String(payload.getBody().decodeData(), StandardCharsets.UTF_8);
-        }
 
-        mailMessage.setBody(mailBody);
+            // setting message id
+            mailMessage.setId(message.getId());
 
-        // getting date
-        JsonNode messagePayloadNode = messageNode.get("payload");
-        Optional<JsonNode> jsonNode = getJsonNodeByField(messagePayloadNode,
-                "Date");
-        jsonNode.ifPresent(jsonNode1 -> mailMessage.setDate(jsonNode1.get(VALUE).asText()));
+            // getting mail body
+            MessagePart payload = message.getPayload();
+            String mailBody = "";
+            if ("multipart/alternative".equals(payload.getMimeType())) {
+                List<String> payloadParts = payload.getParts().stream()
+                        .filter(p -> "text/plain".equals(p.getMimeType()))
+                        .map(p -> new String(p.getBody().decodeData(), StandardCharsets.UTF_8))
+                        .collect(Collectors.toList());
 
-        // getting subject
-        jsonNode = getJsonNodeByField(messagePayloadNode,
-                "Subject");
-        jsonNode.ifPresent(jsonNode1 -> mailMessage.setSubject(jsonNode1.get(VALUE).asText()));
-
-        // getting attachments
-        List<MessagePart> parts = message.getPayload().getParts();
-        if (parts != null && !parts.isEmpty()) {
-            StringBuilder mailAttachmentFileNames = new StringBuilder();
-            for (MessagePart part : parts) {
-                String attachmentId = part.getBody().getAttachmentId();
-
-                String attachmentFilename = part.getFilename();
-                if (attachmentId != null && !attachmentFilename.isEmpty()) {
-
-                    String regex = "(.+?)(\\.[^.]*$|$)";
-                    String pureFileName = "";
-                    String fileNameExtension = "";
-                    Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
-                    if (m.matches()) {
-                        pureFileName = m.group(1);
-                        fileNameExtension = attachmentFilename.substring(pureFileName.length());
-                    }
-
-                    if (nameOfAttachments.contains(pureFileName)) {
-                        //todo attachment number should inc for the in same filename ranges
-                        attachmentNumber++;
-                        attachmentFilename = pureFileName + "_" + attachmentNumber + fileNameExtension;
-
-                    }
-                    nameOfAttachments.add(pureFileName);
-                    mailAttachmentFileNames.append(" ").append(attachmentFilename);
-
-                    // saving attachment file to local storage
-                    storeAttachments(client, userId, message.getId(), attachmentId,
-                            attachmentFilename, attachmentDirectoryPath);
+                if (!payloadParts.isEmpty()) {
+                    mailBody = payloadParts.get(0);
                 }
+            } else if ("text/plain".equals(payload.getMimeType())) {
+                mailBody = new String(payload.getBody().decodeData(), StandardCharsets.UTF_8);
             }
-            mailMessage.setAttachments(mailAttachmentFileNames.toString());
-        }
 
-        // getting from
-        jsonNode = getJsonNodeByField(messagePayloadNode,
-                "From");
-        jsonNode.ifPresent(jsonNode1 -> mailMessage.setFrom(jsonNode1.get(VALUE).asText()));
-        // getting to
-        jsonNode = getJsonNodeByField(messagePayloadNode,
-                "To");
-        jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
+            mailMessage.setBody(mailBody);
 
-        log.info("Mail massage #" + ++mailCounter);
+            // getting date
+            JsonNode messagePayloadNode = messageNode.get("payload");
+            Optional<JsonNode> jsonNode = getJsonNodeByField(messagePayloadNode,
+                    "Date");
+            jsonNode.ifPresent(jsonNode1 -> mailMessage.setDate(jsonNode1.get(VALUE).asText()));
 
-        return mailMessage;
+            // getting subject
+            jsonNode = getJsonNodeByField(messagePayloadNode,
+                    "Subject");
+            jsonNode.ifPresent(jsonNode1 -> mailMessage.setSubject(jsonNode1.get(VALUE).asText()));
+
+            // getting attachments
+            List<MessagePart> parts = message.getPayload().getParts();
+            if (parts != null && !parts.isEmpty()) {
+                StringBuilder mailAttachmentFileNames = new StringBuilder();
+                for (MessagePart part : parts) {
+                    String attachmentId = part.getBody().getAttachmentId();
+
+                    String attachmentFilename = part.getFilename();
+                    if (attachmentId != null && !attachmentFilename.isEmpty()) {
+
+                        String regex = "(.+?)(\\.[^.]*$|$)";
+                        String pureFileName = "";
+                        String fileNameExtension = "";
+                        Matcher m = Pattern.compile(regex).matcher(attachmentFilename);
+                        if (m.matches()) {
+                            pureFileName = m.group(1);
+                            fileNameExtension = attachmentFilename.substring(pureFileName.length());
+                        }
+
+                        if (nameOfAttachments.contains(pureFileName)) {
+                            //todo attachment number should inc for the in same filename ranges
+                            attachmentNumber++;
+                            attachmentFilename = pureFileName + "_" + attachmentNumber + fileNameExtension;
+
+                        }
+                        nameOfAttachments.add(pureFileName);
+                        mailAttachmentFileNames.append(" ").append(attachmentFilename);
+
+                        // saving attachment file to local storage
+                        try {
+                            storeAttachments(client, userId, message.getId(), attachmentId,
+                                    attachmentFilename, attachmentDirectoryPath);
+                        } catch (IOException e) {
+                            log.warning(e.getMessage());
+                        }
+                    }
+                }
+                mailMessage.setAttachments(mailAttachmentFileNames.toString());
+            }
+
+            // getting from
+            jsonNode = getJsonNodeByField(messagePayloadNode,
+                    "From");
+            jsonNode.ifPresent(jsonNode1 -> mailMessage.setFrom(jsonNode1.get(VALUE).asText()));
+            // getting to
+            jsonNode = getJsonNodeByField(messagePayloadNode,
+                    "To");
+            jsonNode.ifPresent(jsonNode1 -> mailMessage.setTo(jsonNode1.get(VALUE).asText()));
+
+            log.info("Mail massage #" + ++mailCounter);
+
+            return mailMessage;
+        });
+
     }
 
     public String getQueryForMultipleLabelsSearching(Gmail service, String userId) {
